@@ -1,0 +1,56 @@
+{
+  "name": "skir-simple-data-objects-generator",
+  "version": "0.1.0",
+  "description": "Skir code generator for std-out/simple-data-objects.",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Maxim Kerstens",
+    "email": "maxim.kerstens@gmail.com"
+  },
+  "homepage": "https://github.com/php-skir/skir-simple-data-objects-generator#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/php-skir/skir-simple-data-objects-generator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/php-skir/skir-simple-data-objects-generator/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "php",
+    "rpc",
+    "simple-data-objects",
+    "skir",
+    "skir-generator"
+  ],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "skir-simple-data-objects-generator": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "pack:dry-run": "npm pack --dry-run --cache .npm-cache",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@php-skir/generator-core": "^0.1.0",
+    "skir-internal": "^0.2.21",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "skir": "^1.2.19",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  }
+}

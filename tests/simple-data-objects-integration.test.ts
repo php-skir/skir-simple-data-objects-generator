@@ -38,6 +38,8 @@ describe("generated Simple Data Objects", () => {
           autoload: {
             "psr-4": {
               "App\\Skir\\": "src/",
+              "Skir\\Client\\": "stubs/Skir/Client/",
+              "Skir\\Server\\": "stubs/Skir/Server/",
             },
           },
           config: {
@@ -139,6 +141,13 @@ describe("generated Simple Data Objects", () => {
               ],
             },
           ],
+          methods: [{
+            kind: "method",
+            name: "SyncAddresses",
+            number: 42,
+            requestType: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } },
+            responseType: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } },
+          }],
         },
       ],
     });
@@ -148,6 +157,96 @@ describe("generated Simple Data Objects", () => {
 
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, file.code);
+      execFileSync("php", ["-l", filePath], { stdio: "pipe" });
+    }
+
+    const stubFiles: Readonly<Record<string, string>> = {
+      "Skir/Client/SkirClient.php": `<?php
+
+declare(strict_types=1);
+
+namespace Skir\\Client;
+
+use Closure;
+use Skir\\Runtime\\MethodDescriptor;
+
+final readonly class SkirClient
+{
+    public function __construct(private Closure $handler) {}
+
+    public function invoke(MethodDescriptor $method, mixed $request): mixed
+    {
+        return ($this->handler)($method, $request);
+    }
+}
+`,
+      "Skir/Server/Contracts/SkirMethodReference.php": `<?php
+
+declare(strict_types=1);
+
+namespace Skir\\Server\\Contracts;
+
+use Skir\\Runtime\\MethodDescriptor;
+
+interface SkirMethodReference
+{
+    public function descriptor(): MethodDescriptor;
+}
+`,
+      "Skir/Server/ProcedureProvider.php": `<?php
+
+declare(strict_types=1);
+
+namespace Skir\\Server;
+
+interface ProcedureProvider
+{
+    public function register(SkirServer $server): void;
+}
+`,
+      "Skir/Server/SkirContext.php": `<?php
+
+declare(strict_types=1);
+
+namespace Skir\\Server;
+
+final readonly class SkirContext {}
+`,
+      "Skir/Server/SkirServer.php": `<?php
+
+declare(strict_types=1);
+
+namespace Skir\\Server;
+
+use Closure;
+use RuntimeException;
+use Skir\\Runtime\\MethodDescriptor;
+
+final class SkirServer
+{
+    /** @var array<string, Closure> */
+    private array $methods = [];
+
+    public function addMethod(MethodDescriptor $method, Closure $handler): void
+    {
+        $this->methods[$method->name] = $handler;
+    }
+
+    public function invoke(string $method, mixed $request): mixed
+    {
+        $handler = $this->methods[$method] ?? throw new RuntimeException('Missing method '.$method.'.');
+
+        return $handler($request, new SkirContext());
+    }
+}
+`,
+    };
+
+    for (const [path, source] of Object.entries(stubFiles)) {
+      const filePath = join(projectPath, "stubs", path);
+
+      mkdirSync(dirname(filePath), { recursive: true });
+      writeFileSync(filePath, source);
       execFileSync("php", ["-l", filePath], { stdio: "pipe" });
     }
 
@@ -161,16 +260,24 @@ require __DIR__.'/vendor/autoload.php';
 
 use App\\Skir\\AddressData;
 use App\\Skir\\AddressEventData;
+use App\\Skir\\AbstractSkirProcedures;
 use App\\Skir\\CompanyContactData;
 use App\\Skir\\ControlRulesData;
 use App\\Skir\\HealthCheckRequestData;
+use App\\Skir\\SkirProcedureProvider;
+use App\\Skir\\SkirProcedures;
+use App\\Skir\\SkirRpcClient;
 use App\\Skir\\SubscriptionStatusData;
 use App\\Skir\\UserData;
 use Illuminate\\Translation\\ArrayLoader;
 use Illuminate\\Translation\\Translator;
 use Illuminate\\Validation\\Factory as ValidatorFactory;
 use Illuminate\\Validation\\ValidationException;
+use Skir\\Client\\SkirClient;
 use Skir\\Runtime\\EnumValue;
+use Skir\\Runtime\\MethodDescriptor;
+use Skir\\Server\\SkirContext;
+use Skir\\Server\\SkirServer;
 use StdOut\\SimpleDataObjects\\BaseData;
 use StdOut\\SimpleDataObjects\\Attributes\\Rules;
 use StdOut\\SimpleDataObjects\\TypedDataCollection;
@@ -346,6 +453,53 @@ if (! is_array($routes->toSkirValue()->value) || ! $decodedRoutes[0][0] instance
     throw new RuntimeException('Nested enum struct arrays did not round trip.');
 }
 
+$client = new SkirRpcClient(new SkirClient(
+    static function (MethodDescriptor $method, mixed $request): mixed {
+        if ($method->name !== 'SyncAddresses' || ! is_array($request) || $request[0]['city'] !== 'Brussels') {
+            throw new RuntimeException('The generated client did not send a raw struct collection.');
+        }
+
+        return $request;
+    },
+));
+$clientResponse = $client->syncAddresses($user->previousAddresses);
+
+if (! $clientResponse instanceof TypedDataCollection || ! $clientResponse->all()[0] instanceof AddressData) {
+    throw new RuntimeException('The generated client did not hydrate its collection response.');
+}
+
+$procedures = new class implements SkirProcedures {
+    public function syncAddresses(TypedDataCollection $request, SkirContext $context): TypedDataCollection
+    {
+        if (! $request->all()[0] instanceof AddressData) {
+            throw new RuntimeException('The generated provider did not hydrate its collection request.');
+        }
+
+        return $request;
+    }
+};
+$providerServer = new SkirServer();
+(new SkirProcedureProvider($procedures))->register($providerServer);
+$providerResponse = $providerServer->invoke('SyncAddresses', $payload['previous_addresses']);
+
+if (! is_array($providerResponse) || $providerResponse[0]['city'] !== 'Brussels') {
+    throw new RuntimeException('The generated provider did not unwrap its collection response.');
+}
+
+$abstractProcedures = new class extends AbstractSkirProcedures {
+    public function syncAddresses(TypedDataCollection $request, SkirContext $context): TypedDataCollection
+    {
+        return $request;
+    }
+};
+$abstractServer = new SkirServer();
+$abstractProcedures->register($abstractServer);
+$abstractResponse = $abstractServer->invoke('SyncAddresses', $payload['previous_addresses']);
+
+if (! is_array($abstractResponse) || $abstractResponse[1]['city'] !== 'Ghent') {
+    throw new RuntimeException('The generated abstract provider collection boundary failed.');
+}
+
 $statusChanged = AddressEventData::statusChanged(SubscriptionStatusData::free());
 $decodedStatus = AddressEventData::fromDenseJson($statusChanged->toDenseJson())->payload();
 
@@ -389,11 +543,17 @@ try {
     });
 
     expect(files.map((file) => file.path).sort()).toEqual([
+      "AbstractSkirProcedures.php",
       "AddressData.php",
       "AddressEventData.php",
       "CompanyContactData.php",
       "ControlRulesData.php",
       "HealthCheckRequestData.php",
+      "SkirMethod.php",
+      "SkirMethods.php",
+      "SkirProcedureProvider.php",
+      "SkirProcedures.php",
+      "SkirRpcClient.php",
       "SubscriptionStatusData.php",
       "UserData.php",
       "skir-server-manifest.json",

@@ -10,6 +10,7 @@ import {
   toPropertyName,
   type GeneratedFile,
   type NormalizedField,
+  type NormalizedMethod,
   type NormalizedRecord,
   type NormalizedSchema,
   type NormalizedType,
@@ -83,7 +84,16 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
     const needsTypedDataCollection = record.fields.some((field) => (
       field.kind === "field"
       && field.hasPayload
-      && requiresEnumTypedDataCollection(field.type)
+      && requiresTypedDataCollection(field.type)
+    ));
+
+    return needsTypedDataCollection ? [TYPED_DATA_COLLECTION] : [];
+  }
+
+  public rpcImports(methods: readonly NormalizedMethod[]): readonly string[] {
+    const needsTypedDataCollection = methods.some((method) => (
+      requiresTypedDataCollection(method.requestType)
+      || requiresTypedDataCollection(method.responseType)
     ));
 
     return needsTypedDataCollection ? [TYPED_DATA_COLLECTION] : [];
@@ -177,19 +187,19 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
   }
 
   public fromSkirExpression(
-    _type: NormalizedType,
-    _expression: string,
-    _context: RenderContext,
+    type: NormalizedType,
+    expression: string,
+    context: RenderContext,
   ): string {
-    return unsupportedRpcGeneration();
+    return valueFromTargetExpression(type, expression, context);
   }
 
   public clientResponseExpression(
-    _type: NormalizedType,
-    _expression: string,
-    _context: RenderContext,
+    type: NormalizedType,
+    expression: string,
+    context: RenderContext,
   ): string {
-    return unsupportedRpcGeneration();
+    return valueFromTargetExpression(type, expression, context);
   }
 
   public enumPayloadToSkirExpression(
@@ -205,14 +215,27 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
     expression: string,
     context: RenderContext,
   ): string {
-    return valueFromEnumPayloadExpression(type, expression, context);
+    return valueFromTargetExpression(type, expression, context);
   }
 
   public manifestObjectClass(
-    _type: NormalizedType,
-    _context: RenderContext,
+    type: NormalizedType,
+    context: RenderContext,
   ): string | null {
-    return unsupportedRpcGeneration();
+    if (type.kind !== "record") {
+      return null;
+    }
+
+    const className = context.names.namesByIdentity.get(type.recordIdentity);
+
+    if (className === undefined) {
+      throw new Error(`No PHP class name was resolved for record ${type.recordIdentity}.`);
+    }
+
+    return canonicalRecordClassName(
+      recordNamespace(type.recordIdentity, context.rootNamespace),
+      className,
+    );
   }
 
   private renderConstructor(
@@ -480,7 +503,7 @@ function valueFromSkirPayloadExpression(
   return expression;
 }
 
-function valueFromEnumPayloadExpression(
+function valueFromTargetExpression(
   type: NormalizedType,
   expression: string,
   context: RenderContext,
@@ -494,7 +517,7 @@ function valueFromEnumPayloadExpression(
   }
 
   if (type.kind === "optional") {
-    return `${expression} === null ? null : ${valueFromEnumPayloadExpression(type.inner, expression, context)}`;
+    return `${expression} === null ? null : ${valueFromTargetExpression(type.inner, expression, context)}`;
   }
 
   return valueFromSkirPayloadExpression(type, expression, context);
@@ -554,9 +577,9 @@ function isDirectStructCollection(
     && type.item.recordType === "struct";
 }
 
-function requiresEnumTypedDataCollection(type: NormalizedType): boolean {
+function requiresTypedDataCollection(type: NormalizedType): boolean {
   if (type.kind === "optional") {
-    return requiresEnumTypedDataCollection(type.inner);
+    return requiresTypedDataCollection(type.inner);
   }
 
   return isDirectStructCollection(type);
@@ -725,8 +748,4 @@ function recordNamespace(recordIdentity: string, rootNamespace: string): string 
 
 function outputPath(context: RenderContext, fileName: string): string {
   return context.pathPrefix === "" ? fileName : `${context.pathPrefix}/${fileName}`;
-}
-
-function unsupportedRpcGeneration(): never {
-  throw new Error("Simple Data Objects RPC generation is not implemented until Task 15.");
 }

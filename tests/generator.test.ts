@@ -335,19 +335,121 @@ describe("generateSimpleDataObjectsFiles", () => {
     expect(source).toContain("'routes' => array_map(");
   });
 
-  it("rejects RPC generation until the Task 15 adapter surface is implemented", () => {
-    expect(() => generateSimpleDataObjectsFiles({
+  it("generates the complete RPC surface and manifest with typed collection boundaries", () => {
+    const files = generateSimpleDataObjectsFiles({
+      config: {
+        namespace: "App\\Skir",
+      },
       modules: [{
         path: "rpc.skir",
+        records: [{
+          kind: "struct",
+          key: "address-key",
+          name: "Address",
+          fields: [
+            { kind: "field", name: "city", number: 0, type: { kind: "string" } },
+          ],
+        }, {
+          recordType: "enum",
+          name: "AddressStatus",
+          fields: [
+            { kind: "field", name: "unknown", number: 1 },
+            { kind: "field", name: "known", number: 2, type: { kind: "record", key: "address-key", name: "Address" } },
+          ],
+        }],
         methods: [{
           kind: "method",
-          name: "Ping",
-          number: 1,
-          requestType: { kind: "string" },
-          responseType: { kind: "string" },
+          name: "SyncAddresses",
+          number: 42,
+          requestType: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } },
+          responseType: { kind: "optional", other: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } } },
+        }, {
+          kind: "method",
+          name: "GetAddressStatus",
+          number: 43,
+          requestType: { kind: "record", key: "address-key", name: "Address" },
+          responseType: { kind: "record", name: "AddressStatus", recordType: "enum" },
         }],
       }],
-    })).toThrow("Simple Data Objects RPC generation is not implemented until Task 15.");
+    });
+    const client = files.find((file) => file.path === "SkirRpcClient.php")?.code ?? "";
+    const procedures = files.find((file) => file.path === "SkirProcedures.php")?.code ?? "";
+    const provider = files.find((file) => file.path === "SkirProcedureProvider.php")?.code ?? "";
+    const abstractProcedures = files.find((file) => file.path === "AbstractSkirProcedures.php")?.code ?? "";
+    const manifest = files.find((file) => file.path === "skir-server-manifest.json")?.code ?? "";
+
+    expect(files.map((file) => file.path).sort()).toEqual([
+      "AbstractSkirProcedures.php",
+      "AddressData.php",
+      "AddressStatusData.php",
+      "SkirMethod.php",
+      "SkirMethods.php",
+      "SkirProcedureProvider.php",
+      "SkirProcedures.php",
+      "SkirRpcClient.php",
+      "skir-server-manifest.json",
+    ]);
+    expect(client).toContain("public function syncAddresses(TypedDataCollection $request): ?TypedDataCollection");
+    expect(client).toContain("$request->all()");
+    expect(client).toContain("return $response === null ? null : TypedDataCollection::of(AddressData::class, array_map(");
+    expect(procedures).toContain("public function syncAddresses(TypedDataCollection $request, SkirContext $context): ?TypedDataCollection;");
+    expect(provider).toContain("TypedDataCollection::of(AddressData::class, array_map(");
+    expect(provider).toContain("return $response === null ? null : array_map(");
+    expect(provider).toContain("$response->all()");
+    expect(abstractProcedures).toContain("abstract public function syncAddresses(TypedDataCollection $request, SkirContext $context): ?TypedDataCollection;");
+    expect(JSON.parse(manifest)).toEqual({
+      version: 1,
+      generator: "skir-simple-data-objects-generator",
+      modules: [{
+        name: "_Root",
+        methodEnum: "App\\Skir\\SkirMethod",
+        methods: [{
+          name: "SyncAddresses",
+          enumCase: "SyncAddresses",
+          phpMethod: "syncAddresses",
+          requestType: "TypedDataCollection",
+          requestClass: null,
+          responseType: "?TypedDataCollection",
+          responseClass: null,
+        }, {
+          name: "GetAddressStatus",
+          enumCase: "GetAddressStatus",
+          phpMethod: "getAddressStatus",
+          requestType: "App\\Skir\\AddressData",
+          requestClass: "App\\Skir\\AddressData",
+          responseType: "App\\Skir\\AddressStatusData",
+          responseClass: "App\\Skir\\AddressStatusData",
+        }],
+      }],
+    });
+  });
+
+  it("keeps nested struct arrays as plain RPC arrays without target collection imports", () => {
+    const files = generateSimpleDataObjectsFiles({
+      modules: [{
+        path: "nested-rpc.skir",
+        records: [{
+          kind: "struct",
+          key: "item-key",
+          name: "Item",
+          fields: [],
+        }],
+        methods: [{
+          kind: "method",
+          name: "Nest",
+          number: 45,
+          requestType: {
+            kind: "array",
+            item: { kind: "array", item: { kind: "record", key: "item-key", name: "Item" } },
+          },
+          responseType: { kind: "array", item: { kind: "string" } },
+        }],
+      }],
+    });
+    const client = files.find((file) => file.path === "SkirRpcClient.php")?.code ?? "";
+
+    expect(client).toContain("public function nest(array $request): array");
+    expect(client).not.toContain("StdOut\\SimpleDataObjects\\TypedDataCollection");
   });
 
   it("preplans and aliases enum collection imports that collide with generated records", () => {
@@ -379,9 +481,24 @@ describe("generateSimpleDataObjectsFiles", () => {
             },
           }],
         }],
+        methods: [{
+          kind: "method",
+          name: "Collect",
+          number: 44,
+          requestType: {
+            kind: "array",
+            item: { kind: "record", key: "collection-key", name: "CollectionItem" },
+          },
+          responseType: {
+            kind: "array",
+            item: { kind: "record", key: "collection-key", name: "CollectionItem" },
+          },
+        }],
       }],
     });
     const source = files.find((file) => file.path === "CollectionEventData.php")?.code ?? "";
+    const client = files.find((file) => file.path === "SkirRpcClient.php")?.code ?? "";
+    const provider = files.find((file) => file.path === "SkirProcedureProvider.php")?.code ?? "";
     const lintDirectory = mkdtempSync(join(tmpdir(), "skir-sdo-enum-import-"));
     const lintFile = join(lintDirectory, "CollectionEventData.php");
 
@@ -394,8 +511,27 @@ describe("generateSimpleDataObjectsFiles", () => {
     expect(source).toContain(
       "SimpleDataObjectsTypedDataCollection::of(TypedDataCollection::class, array_map(",
     );
+    expect(client).toContain(
+      "use StdOut\\SimpleDataObjects\\TypedDataCollection as SimpleDataObjectsTypedDataCollection;",
+    );
+    expect(client).toContain(
+      "public function collect(SimpleDataObjectsTypedDataCollection $request): SimpleDataObjectsTypedDataCollection",
+    );
+    expect(client).toContain(
+      "SimpleDataObjectsTypedDataCollection::of(TypedDataCollection::class, array_map(",
+    );
+    expect(provider).toContain(
+      "use StdOut\\SimpleDataObjects\\TypedDataCollection as SimpleDataObjectsTypedDataCollection;",
+    );
 
     writeFileSync(lintFile, source);
     expect(() => execFileSync("php", ["-l", lintFile], { stdio: "pipe" })).not.toThrow();
+
+    for (const [index, file] of files.filter((file) => file.path.endsWith(".php")).entries()) {
+      const generatedLintFile = join(lintDirectory, `${index}.php`);
+
+      writeFileSync(generatedLintFile, file.code);
+      expect(() => execFileSync("php", ["-l", generatedLintFile], { stdio: "pipe" })).not.toThrow();
+    }
   });
 });

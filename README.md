@@ -6,6 +6,8 @@ Generated PHP uses `php-skir/runtime` for Skir wire formats and `std-out/simple-
 
 ## Quick start
 
+Prerequisites: PHP 8.4 or newer, Composer 2, and a supported Node.js release.
+
 Install Skir and this generator as development dependencies, then install the PHP runtime and DTO library:
 
 ```bash
@@ -132,6 +134,25 @@ $updated->equals($user); // false
 ```
 
 `BaseData::from()` hydrates without validation. Use `makeFromSkirPayload()` for raw Skir data: it applies the generated validation contract and performs the Skir-specific recursive conversions before calling `BaseData::from()`.
+
+`BaseData::collection()`, `BaseData::lazyCollection()`, and `TypedDataCollection::of()` are also trusted hydration paths. Like `from()`, they do not execute generated `#[Rules]` validation. Construct collections from DTOs or other trusted values:
+
+```php
+use Skir\AddressData;
+
+$addresses = AddressData::collection([
+    AddressData::makeFromSkirPayload([
+        'city' => 'Antwerp',
+        'postal_codes' => ['2000'],
+    ]),
+]);
+
+foreach ($addresses as $address) {
+    echo $address->city;
+}
+```
+
+For untrusted raw item arrays, call `AddressData::makeFromSkirPayload()` for each item before constructing a collection. When the collection belongs to a generated parent DTO or RPC request, prefer passing the complete raw parent payload through the parent's `makeFromSkirPayload()` or generated RPC hydration path; those paths validate each nested struct before collection construction.
 
 ### Struct collections
 
@@ -318,7 +339,7 @@ The integration tests require PHP 8.4, Composer, and a local checkout of `php-sk
 
 ### Develop against a local generator core
 
-Build the core first and create the temporary npm link after installing this package's dependencies because a later install can replace it. Before the initial compatible core release and adapter lockfile commit, install without creating a lock:
+Build the core first. Before the initial compatible core release and adapter lockfile commit, one no-save install can install this package's development dependencies and satisfy `@php-skir/generator-core` from the local checkout without creating a lockfile:
 
 ```bash
 cd ../generator-core
@@ -326,11 +347,10 @@ npm ci
 npm run build
 
 cd ../skir-simple-data-objects-generator
-npm install --package-lock=false
-npm link --no-save --package-lock=false ../generator-core
+npm install --no-save --package-lock=false ../generator-core
 ```
 
-Do not commit a lockfile change produced only by local linking. Once the compatible core package has been published and this repository has committed its normal `package-lock.json`, use `npm ci` instead.
+Once the compatible core package has been published and this repository has committed its normal `package-lock.json`, use `npm ci` instead of the local-path bootstrap.
 
 ## Releasing
 

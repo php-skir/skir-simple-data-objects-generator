@@ -1,5 +1,11 @@
 # Skir Simple Data Objects Generator
 
+[![Tests](https://github.com/php-skir/skir-simple-data-objects-generator/actions/workflows/tests.yml/badge.svg)](https://github.com/php-skir/skir-simple-data-objects-generator/actions/workflows/tests.yml)
+[![Coverage](https://raw.githubusercontent.com/php-skir/skir-simple-data-objects-generator/badges/coverage.svg)](https://github.com/php-skir/skir-simple-data-objects-generator/actions/workflows/tests.yml)
+[![npm](https://img.shields.io/badge/npm-unreleased-lightgrey?logo=npm)](https://www.npmjs.com/package/skir-simple-data-objects-generator)
+[![Node.js](https://img.shields.io/badge/Node.js-22%20%7C%2024-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![License](https://img.shields.io/github/license/php-skir/skir-simple-data-objects-generator)](LICENSE)
+
 Generates [`std-out/simple-data-objects`](https://github.com/std-out/simple-data-objects) DTOs, typed RPC clients, and server procedure contracts from Skir schemas.
 
 Generated PHP uses `php-skir/runtime` for Skir wire formats and `std-out/simple-data-objects` for immutable DTO hydration, mapped property names, typed collections, serialization, and validation.

@@ -5,6 +5,10 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   tests:
@@ -16,13 +20,22 @@ jobs:
       matrix:
         node:
           - "22"
+          - "24"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout generator
+        uses: actions/checkout@v7
+        with:
+          path: generator
+
+      - name: Checkout generator core
+        uses: actions/checkout@v7
+        with:
+          repository: php-skir/generator-core
+          path: generator-core
 
       - name: Checkout runtime
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: php-skir/runtime
           path: runtime
@@ -35,24 +48,109 @@ jobs:
           tools: composer:v2
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
+          package-manager-cache: false
 
-      - name: Install dependencies
+      - name: Install generator core dependencies
+        working-directory: generator-core
         run: npm ci
 
+      - name: Build generator core
+        working-directory: generator-core
+        run: npm run build
+
+      - name: Install dependencies
+        working-directory: generator
+        run: npm install --no-save ../generator-core
+
       - name: Typecheck
+        working-directory: generator
         run: npm run typecheck
 
       - name: Build
+        working-directory: generator
         run: npm run build
 
       - name: Validate package
+        working-directory: generator
         run: npm run pack:dry-run
 
       - name: Run tests
+        working-directory: generator
         run: npm test
         env:
           SKIR_RUNTIME_PATH: ${{ github.workspace }}/runtime
+
+  coverage:
+    name: Coverage
+    if: github.ref == 'refs/heads/main'
+    needs: tests
+    runs-on: ubuntu-latest
+    concurrency:
+      group: coverage-badge
+      cancel-in-progress: false
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout generator
+        uses: actions/checkout@v7
+        with:
+          path: generator
+
+      - name: Checkout generator core
+        uses: actions/checkout@v7
+        with:
+          repository: php-skir/generator-core
+          path: generator-core
+
+      - name: Checkout runtime
+        uses: actions/checkout@v7
+        with:
+          repository: php-skir/runtime
+          path: runtime
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          tools: composer:v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install generator core dependencies
+        working-directory: generator-core
+        run: npm ci
+
+      - name: Build generator core
+        working-directory: generator-core
+        run: npm run build
+
+      - name: Install dependencies
+        working-directory: generator
+        run: npm install --no-save ../generator-core
+
+      - name: Measure coverage
+        working-directory: generator
+        run: npm run test:coverage
+        env:
+          SKIR_RUNTIME_PATH: ${{ github.workspace }}/runtime
+
+      - name: Generate coverage badge
+        working-directory: generator
+        run: |
+          percentage=$(node -p 'JSON.parse(require("node:fs").readFileSync("coverage/coverage-summary.json", "utf8")).total.lines.pct')
+          node .github/scripts/write-coverage-badge.mjs "$percentage" build/coverage.svg
+
+      - name: Publish coverage badge
+        working-directory: generator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/publish-coverage-badge.sh build/coverage.svg

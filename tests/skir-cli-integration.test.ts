@@ -4,11 +4,21 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+
+const EXTERNAL_COMMAND_TIMEOUT_MS = 120_000;
+const projectPaths: string[] = [];
+
+afterEach(() => {
+  for (const projectPath of projectPaths.splice(0)) {
+    rmSync(projectPath, { recursive: true, force: true });
+  }
+});
 
 describe("skir CLI integration", () => {
   it("generates executable SDO PHP and an exact manifest from imported real .skir files", () => {
     const projectPath = mkdtempSync(join(tmpdir(), "skir-sdo-generator-cli-"));
+    projectPaths.push(projectPath);
     const skirSourcePath = join(projectPath, "skir-src");
     const adminSourcePath = join(skirSourcePath, "admin");
     const commonSourcePath = join(skirSourcePath, "common");
@@ -183,6 +193,7 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
     execFileSync("node", [skirBinPath, "gen", "--root", projectPath], {
       cwd: resolve("."),
       stdio: "pipe",
+      timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
     });
 
     execFileSync("node", [
@@ -192,7 +203,11 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
       projectPath,
       "--mod",
       pathToFileURL(generatorPath).href,
-    ], { cwd: resolve("."), stdio: "pipe" });
+    ], {
+      cwd: resolve("."),
+      stdio: "pipe",
+      timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
+    });
 
     expect(JSON.parse(readFileSync(join(projectPath, "composer.json"), "utf8")))
       .toMatchObject({
@@ -219,7 +234,10 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
       const filePath = join(generatedPath, generatedFile);
 
       expect(existsSync(filePath)).toBe(true);
-      execFileSync("php", ["-l", filePath], { stdio: "pipe" });
+      execFileSync("php", ["-l", filePath], {
+        stdio: "pipe",
+        timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
+      });
     }
 
     const userCode = readFileSync(join(generatedPath, "Admin", "UserData.php"), "utf8");
@@ -257,7 +275,12 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
         COMPOSER_HOME: composerHome,
       },
       stdio: "pipe",
+      timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
     });
-    execFileSync("php", ["verify.php"], { cwd: projectPath, stdio: "inherit" });
+    execFileSync("php", ["verify.php"], {
+      cwd: projectPath,
+      stdio: "inherit",
+      timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
+    });
   }, 180_000);
 });

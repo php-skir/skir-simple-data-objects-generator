@@ -238,6 +238,10 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
     );
   }
 
+  public manifestPhpType(type: NormalizedType): string | null {
+    return isDirectStructCollection(type) ? TYPED_DATA_COLLECTION : null;
+  }
+
   private renderConstructor(
     record: NormalizedRecord,
     fields: readonly NormalizedField[],

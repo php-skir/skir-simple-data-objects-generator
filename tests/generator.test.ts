@@ -407,9 +407,9 @@ describe("generateSimpleDataObjectsFiles", () => {
           name: "SyncAddresses",
           enumCase: "SyncAddresses",
           phpMethod: "syncAddresses",
-          requestType: "TypedDataCollection",
+          requestType: "StdOut\\SimpleDataObjects\\TypedDataCollection",
           requestClass: null,
-          responseType: "?TypedDataCollection",
+          responseType: "?StdOut\\SimpleDataObjects\\TypedDataCollection",
           responseClass: null,
         }, {
           name: "GetAddressStatus",

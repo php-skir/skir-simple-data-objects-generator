@@ -34,13 +34,207 @@ describe("generateSimpleDataObjectsFiles", () => {
       "",
       "namespace Skir\\Health;",
       "",
+      "use Skir\\Runtime\\DenseJson;",
+      "use Skir\\Runtime\\Field;",
+      "use Skir\\Runtime\\Type;",
       "use StdOut\\SimpleDataObjects\\BaseData;",
       "",
       "final class HealthRequestData extends BaseData",
       "{",
+      "    public static function skirType(): Type",
+      "    {",
+      "        return Type::struct([]);",
+      "    }",
+      "",
+      "    /** @param array<string, mixed> $data */",
+      "    public static function makeFromSkirPayload(array $data): self",
+      "    {",
+      "        self::validate($data);",
+      "",
+      "        $payload = [];",
+      "",
+      "        return self::from($payload);",
+      "    }",
+      "",
+      "    public static function fromSkir(string $json): HealthRequestData",
+      "    {",
+      "        $data = DenseJson::fromJson(self::skirType(), $json);",
+      "",
+      "        return self::makeFromSkirPayload($data);",
+      "    }",
+      "",
+      "    /** @return array<string, mixed> */",
+      "    public function toSkirArray(): array",
+      "    {",
+      "        return [];",
+      "    }",
+      "",
+      "    /** @return array<int, mixed> */",
+      "    public function toSkir(): array",
+      "    {",
+      "        return DenseJson::encode(self::skirType(), $this->toSkirArray());",
+      "    }",
+      "",
+      "    public function toSkirJson(): string",
+      "    {",
+      "        return DenseJson::toJson(self::skirType(), $this->toSkirArray());",
+      "    }",
       "}",
       "",
     ].join("\n"));
     expect(struct?.code).not.toContain("__construct");
+  });
+
+  it("generates mapped readonly fields, typed collections, validation, and Skir conversions", () => {
+    const files = generateSimpleDataObjectsFiles({
+      config: {
+        namespace: "App\\Skir",
+        validation: {
+          "users.skir": {
+            User: {
+              user_id: ["min:1", "custom_user_id"],
+            },
+          },
+        },
+      },
+      modules: [
+        {
+          path: "users.skir",
+          records: [
+            {
+              kind: "struct",
+              key: "address-key",
+              name: "Address",
+              fields: [
+                { kind: "field", name: "city", number: 0, type: { kind: "string" } },
+              ],
+            },
+            {
+              kind: "struct",
+              key: "user-key",
+              name: "User",
+              fields: [
+                { kind: "field", name: "user_id", number: 0, type: { kind: "int32" } },
+                { kind: "removed", number: 1 },
+                { kind: "field", name: "address", number: 2, type: { kind: "record", key: "address-key", name: "Address" } },
+                { kind: "field", name: "previous_addresses", number: 3, type: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } } },
+                { kind: "field", name: "optional_addresses", number: 4, type: { kind: "optional", other: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } } } },
+                { kind: "field", name: "nullable_addresses", number: 5, type: { kind: "array", item: { kind: "optional", other: { kind: "record", key: "address-key", name: "Address" } } } },
+                { kind: "field", name: "nested_addresses", number: 6, type: { kind: "array", item: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } } } },
+                { kind: "field", name: "labels", number: 7, type: { kind: "array", item: { kind: "string" } } },
+                { kind: "field", name: "nickname", number: 8, type: { kind: "optional", other: { kind: "string" } } },
+                { kind: "field", name: "large_id", number: 9, type: { kind: "int64" } },
+                { kind: "field", name: "status", number: 10, type: { kind: "record", key: "status-key", name: "SubscriptionStatus", recordType: "enum" } },
+              ],
+            },
+            {
+              recordType: "enum",
+              key: "status-key",
+              name: "SubscriptionStatus",
+              fields: [
+                { kind: "field", name: "free", number: 1 },
+                { kind: "field", name: "premium_since", number: 2, type: { kind: "timestamp" } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const user = files.find((file) => file.path === "UserData.php")?.code ?? "";
+    const status = files.find((file) => file.path === "SubscriptionStatusData.php")?.code ?? "";
+
+    expect(user).toContain("use StdOut\\SimpleDataObjects\\Attributes\\DataCollection;");
+    expect(user).toContain("use StdOut\\SimpleDataObjects\\Attributes\\MapPropertyName;");
+    expect(user).toContain("use StdOut\\SimpleDataObjects\\Attributes\\Rules;");
+    expect(user).toContain("use StdOut\\SimpleDataObjects\\TypedDataCollection;");
+    expect(user).toContain("#[MapPropertyName('user_id')]\n        #[Rules(['required', 'integer', 'min:1', 'custom_user_id'])]\n        public readonly int $userId,");
+    expect(user).toContain("#[Rules(['required', 'array'])]\n        public readonly AddressData $address,");
+    expect(user).toContain("#[DataCollection(AddressData::class)]\n        public readonly TypedDataCollection $previousAddresses,");
+    expect(user).toContain("public readonly ?TypedDataCollection $optionalAddresses,");
+    expect(user).toContain("public readonly array $nullableAddresses,");
+    expect(user).toContain("public readonly array $nestedAddresses,");
+    expect(user).toContain("public readonly array $labels,");
+    expect(user).toContain("#[Rules(['nullable', 'string'])]");
+    expect(user).toContain("#[Rules(['required'])]\n        public readonly int|string $largeId,");
+    expect(user).toContain("public readonly SubscriptionStatusData $status,");
+    expect(user).toContain("public static function skirType(): Type");
+    expect(user).toContain("Field::removed(1)");
+    expect(user).toContain("public static function makeFromSkirPayload(array $data): self");
+    expect(user.indexOf("self::validate($data);")).toBeLessThan(
+      user.indexOf("AddressData::makeFromSkirPayload($data['address'])"),
+    );
+    expect(user).toContain("'previous_addresses' => array_map(");
+    expect(user).toContain("AddressData::makeFromSkirPayload($item)");
+    expect(user).toContain("'status' => SubscriptionStatusData::fromSkirValue($data['status'])");
+    expect(user).toContain("return self::from($payload);");
+    expect(user).toContain("public static function fromSkir(string $json): UserData");
+    expect(user).toContain("public function toSkirArray(): array");
+    expect(user).toContain("$this->previousAddresses->all()");
+    expect(user).toContain("public function toSkir(): array");
+    expect(user).toContain("public function toSkirJson(): string");
+    expect(status).toContain("final readonly class SubscriptionStatusData");
+    expect(status).toContain("public static function premiumSince(int $value): self");
+  });
+
+  it("escapes attribute literals and resolves target import collisions", () => {
+    const files = generateSimpleDataObjectsFiles({
+      config: {
+        validation: {
+          "collision.skir": {
+            Base: {
+              quoted_value: ["regex:\\\\d+'s"],
+            },
+          },
+        },
+      },
+      modules: [
+        {
+          path: "collision.skir",
+          records: [
+            {
+              kind: "struct",
+              name: "Base",
+              fields: [
+                { kind: "field", name: "quoted_value", number: 0, type: { kind: "string" } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const source = files.find((file) => file.path === "BaseData.php")?.code ?? "";
+
+    expect(source).toContain("use StdOut\\SimpleDataObjects\\BaseData as SimpleDataObjectsBaseData;");
+    expect(source).toContain("final class BaseData extends SimpleDataObjectsBaseData");
+    expect(source).toContain("#[MapPropertyName('quoted_value')]");
+    expect(source).toContain("#[Rules(['required', 'string', 'regex:\\\\\\\\d+\\'s'])]");
+  });
+
+  it("rejects invalid validation selectors before rendering", () => {
+    expect(() => generateSimpleDataObjectsFiles({
+      config: {
+        validation: {
+          "users.skir": {
+            User: {
+              missing: ["required"],
+            },
+          },
+        },
+      },
+      modules: [
+        {
+          path: "users.skir",
+          records: [
+            {
+              kind: "struct",
+              name: "User",
+              fields: [
+                { kind: "field", name: "name", number: 0, type: { kind: "string" } },
+              ],
+            },
+          ],
+        },
+      ],
+    })).toThrow('Unknown validation field "users.skir::User.missing".');
   });
 });

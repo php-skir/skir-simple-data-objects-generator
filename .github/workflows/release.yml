@@ -8,24 +8,18 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  publish:
-    name: Publish to npm
+  verify:
+    name: Verify release package
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout generator
         uses: actions/checkout@v7
         with:
           path: generator
-
-      - name: Checkout generator core
-        uses: actions/checkout@v7
-        with:
-          repository: php-skir/generator-core
-          path: generator-core
 
       - name: Checkout runtime
         uses: actions/checkout@v7
@@ -47,17 +41,9 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Install generator core dependencies
-        working-directory: generator-core
-        run: npm ci
-
-      - name: Build generator core
-        working-directory: generator-core
-        run: npm run build
-
       - name: Install dependencies
         working-directory: generator
-        run: npm install --no-save ../generator-core
+        run: npm ci
 
       - name: Typecheck
         working-directory: generator
@@ -67,16 +53,63 @@ jobs:
         working-directory: generator
         run: npm run build
 
-      - name: Validate package
-        working-directory: generator
-        run: npm run pack:dry-run
-
       - name: Run tests
         working-directory: generator
         run: npm test
         env:
           SKIR_RUNTIME_PATH: ${{ github.workspace }}/runtime
 
-      - name: Publish
+      - name: Validate package
         working-directory: generator
-        run: npm publish --provenance --access public
+        run: npm run pack:dry-run
+
+      - name: Create release package
+        working-directory: generator
+        run: |
+          mkdir -p build/package
+          npm pack --ignore-scripts --pack-destination build/package --cache .npm-cache
+
+      - name: Smoke test release package
+        working-directory: generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_dir=$(mktemp -d "${RUNNER_TEMP}/skir-sdo-release.XXXXXX")
+          trap 'rm -rf "$smoke_dir"' EXIT
+          package_tarballs=(build/package/skir-simple-data-objects-generator-*.tgz)
+          test "${#package_tarballs[@]}" -eq 1
+          timeout 120s npm install --prefix "$smoke_dir" --ignore-scripts --no-audit --no-fund "${package_tarballs[0]}"
+          cd "$smoke_dir"
+          node --input-type=module --eval 'import { generateSimpleDataObjectsFiles } from "skir-simple-data-objects-generator"; const files = generateSimpleDataObjectsFiles({ modules: [] }); if (!Array.isArray(files)) throw new Error("Unexpected generator result.");'
+
+      - name: Upload verified release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: generator/build/package/skir-simple-data-objects-generator-*.tgz
+          if-no-files-found: error
+
+  publish:
+    name: Publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Download verified release package
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: release-package
+
+      - name: Publish
+        run: npm publish release-package/skir-simple-data-objects-generator-*.tgz --provenance --access public --ignore-scripts

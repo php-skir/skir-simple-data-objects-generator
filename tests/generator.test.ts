@@ -1,11 +1,21 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { generateSimpleDataObjectsFiles } from "../src/generator.js";
+
+const PHP_LINT_TIMEOUT_MS = 10_000;
+const PHP_LINT_MAX_BUFFER_BYTES = 1024 * 1024;
+const lintDirectories: string[] = [];
+
+afterEach(() => {
+  for (const lintDirectory of lintDirectories.splice(0)) {
+    rmSync(lintDirectory, { recursive: true, force: true });
+  }
+});
 
 describe("generateSimpleDataObjectsFiles", () => {
   it("generates an empty BaseData class with the stable Data suffix", () => {
@@ -500,6 +510,7 @@ describe("generateSimpleDataObjectsFiles", () => {
     const client = files.find((file) => file.path === "SkirRpcClient.php")?.code ?? "";
     const provider = files.find((file) => file.path === "SkirProcedureProvider.php")?.code ?? "";
     const lintDirectory = mkdtempSync(join(tmpdir(), "skir-sdo-enum-import-"));
+    lintDirectories.push(lintDirectory);
     const lintFile = join(lintDirectory, "CollectionEventData.php");
 
     expect(source).toContain(
@@ -525,13 +536,21 @@ describe("generateSimpleDataObjectsFiles", () => {
     );
 
     writeFileSync(lintFile, source);
-    expect(() => execFileSync("php", ["-l", lintFile], { stdio: "pipe" })).not.toThrow();
+    expect(() => execFileSync("php", ["-l", lintFile], {
+      maxBuffer: PHP_LINT_MAX_BUFFER_BYTES,
+      stdio: "pipe",
+      timeout: PHP_LINT_TIMEOUT_MS,
+    })).not.toThrow();
 
     for (const [index, file] of files.filter((file) => file.path.endsWith(".php")).entries()) {
       const generatedLintFile = join(lintDirectory, `${index}.php`);
 
       writeFileSync(generatedLintFile, file.code);
-      expect(() => execFileSync("php", ["-l", generatedLintFile], { stdio: "pipe" })).not.toThrow();
+      expect(() => execFileSync("php", ["-l", generatedLintFile], {
+        maxBuffer: PHP_LINT_MAX_BUFFER_BYTES,
+        stdio: "pipe",
+        timeout: PHP_LINT_TIMEOUT_MS,
+      })).not.toThrow();
     }
   });
 });

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -8,24 +8,25 @@ import { afterEach, describe, expect, it } from "vitest";
 import { generateSimpleDataObjectsFiles } from "../src/generator.js";
 
 const EXTERNAL_COMMAND_TIMEOUT_MS = 120_000;
-const projectPaths: string[] = [];
+const EXTERNAL_COMMAND_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+const temporaryPaths: string[] = [];
 
 afterEach(() => {
-  for (const projectPath of projectPaths.splice(0)) {
-    rmSync(projectPath, { recursive: true, force: true });
+  for (const temporaryPath of temporaryPaths.splice(0)) {
+    rmSync(temporaryPath, { recursive: true, force: true });
   }
 });
 
 describe("generated Simple Data Objects", () => {
   it("validates, hydrates, maps, updates, compares, and round-trips real objects", () => {
     const projectPath = mkdtempSync(join(tmpdir(), "skir-simple-data-objects-generator-"));
-    projectPaths.push(projectPath);
+    temporaryPaths.push(projectPath);
     const sourcePath = join(projectPath, "src");
-    const composerHome = join(projectPath, ".composer");
+    const composerHome = mkdtempSync(join(tmpdir(), "skir-simple-data-objects-composer-"));
+    temporaryPaths.push(composerHome);
     const runtimePath = process.env.SKIR_RUNTIME_PATH ?? resolve("../runtime");
 
     mkdirSync(sourcePath, { recursive: true });
-    mkdirSync(composerHome, { recursive: true });
 
     writeFileSync(
       join(projectPath, "composer.json"),
@@ -168,6 +169,7 @@ describe("generated Simple Data Objects", () => {
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, file.code);
       execFileSync("php", ["-l", filePath], {
+        maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
         stdio: "pipe",
         timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
       });
@@ -261,6 +263,7 @@ final class SkirServer
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, source);
       execFileSync("php", ["-l", filePath], {
+        maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
         stdio: "pipe",
         timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
       });
@@ -285,6 +288,7 @@ use App\\Skir\\SkirProcedures;
 use App\\Skir\\SkirRpcClient;
 use App\\Skir\\SubscriptionStatusData;
 use App\\Skir\\UserData;
+use Composer\\InstalledVersions;
 use Illuminate\\Translation\\ArrayLoader;
 use Illuminate\\Translation\\Translator;
 use Illuminate\\Validation\\Factory as ValidatorFactory;
@@ -301,6 +305,25 @@ use StdOut\\SimpleDataObjects\\TypedDataCollection;
 $validator = new ValidatorFactory(new Translator(new ArrayLoader(), 'en'));
 $validator->extend('company_email', static fn (string $attribute, mixed $value): bool => is_string($value) && str_ends_with($value, '@company.test'));
 BaseData::setValidatorFactory($validator);
+
+if (! InstalledVersions::isInstalled('std-out/simple-data-objects')) {
+    throw new RuntimeException('The real Simple Data Objects package is not installed.');
+}
+
+if (! InstalledVersions::isInstalled('php-skir/runtime')) {
+    throw new RuntimeException('The real Skir runtime package is not installed.');
+}
+
+$simpleDataObjectsSource = (new ReflectionClass(BaseData::class))->getFileName();
+$runtimeSource = (new ReflectionClass(EnumValue::class))->getFileName();
+
+if (! is_string($simpleDataObjectsSource) || ! str_contains($simpleDataObjectsSource, '/vendor/std-out/simple-data-objects/')) {
+    throw new RuntimeException('Simple Data Objects did not load from its Composer package.');
+}
+
+if (! is_string($runtimeSource) || ! str_contains($runtimeSource, '/vendor/php-skir/runtime/')) {
+    throw new RuntimeException('The Skir runtime did not load from its Composer package.');
+}
 
 $controlParameters = (new ReflectionClass(ControlRulesData::class))
     ->getConstructor()
@@ -542,20 +565,34 @@ try {
 `,
     );
 
-    if (!existsSync(join(projectPath, "vendor", "autoload.php"))) {
-      execFileSync("composer", ["install", "--no-interaction", "--no-progress"], {
+    try {
+      execFileSync("composer", [
+        "install",
+        "--no-interaction",
+        "--no-plugins",
+        "--no-progress",
+        "--no-scripts",
+        "--prefer-dist",
+      ], {
         cwd: projectPath,
         env: {
           ...process.env,
+          COMPOSER_CACHE_DIR: join(composerHome, "cache"),
           COMPOSER_HOME: composerHome,
+          COMPOSER_NO_INTERACTION: "1",
         },
+        maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
         stdio: "pipe",
         timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
       });
+    } finally {
+      rmSync(composerHome, { recursive: true, force: true });
+      temporaryPaths.splice(temporaryPaths.indexOf(composerHome), 1);
     }
 
     execFileSync("php", ["verify.php"], {
       cwd: projectPath,
+      maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
       stdio: "inherit",
       timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
     });

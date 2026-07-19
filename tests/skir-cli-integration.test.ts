@@ -7,24 +7,26 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const EXTERNAL_COMMAND_TIMEOUT_MS = 120_000;
-const projectPaths: string[] = [];
+const EXTERNAL_COMMAND_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+const temporaryPaths: string[] = [];
 
 afterEach(() => {
-  for (const projectPath of projectPaths.splice(0)) {
-    rmSync(projectPath, { recursive: true, force: true });
+  for (const temporaryPath of temporaryPaths.splice(0)) {
+    rmSync(temporaryPath, { recursive: true, force: true });
   }
 });
 
 describe("skir CLI integration", () => {
   it("generates executable SDO PHP and an exact manifest from imported real .skir files", () => {
     const projectPath = mkdtempSync(join(tmpdir(), "skir-sdo-generator-cli-"));
-    projectPaths.push(projectPath);
+    temporaryPaths.push(projectPath);
     const skirSourcePath = join(projectPath, "skir-src");
     const adminSourcePath = join(skirSourcePath, "admin");
     const commonSourcePath = join(skirSourcePath, "common");
     const stubClientPath = join(projectPath, "stub-client", "Skir", "Client");
     const generatedPath = join(projectPath, "generated", "skirout");
-    const composerHome = join(projectPath, ".composer");
+    const composerHome = mkdtempSync(join(tmpdir(), "skir-sdo-generator-composer-"));
+    temporaryPaths.push(composerHome);
     const runtimePath = process.env.SKIR_RUNTIME_PATH ?? resolve("../runtime");
     const generatorPath = resolve("dist/index.js");
     const skirBinPath = resolve("node_modules/skir/dist/compiler.js");
@@ -37,7 +39,6 @@ describe("skir CLI integration", () => {
     mkdirSync(adminSourcePath, { recursive: true });
     mkdirSync(commonSourcePath, { recursive: true });
     mkdirSync(stubClientPath, { recursive: true });
-    mkdirSync(composerHome, { recursive: true });
 
     writeFileSync(join(projectPath, "skir.yml"), [
       "generators:",
@@ -192,6 +193,7 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
 
     execFileSync("node", [skirBinPath, "gen", "--root", projectPath], {
       cwd: resolve("."),
+      maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
       stdio: "pipe",
       timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
     });
@@ -205,6 +207,7 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
       pathToFileURL(generatorPath).href,
     ], {
       cwd: resolve("."),
+      maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
       stdio: "pipe",
       timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
     });
@@ -235,6 +238,7 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
 
       expect(existsSync(filePath)).toBe(true);
       execFileSync("php", ["-l", filePath], {
+        maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
         stdio: "pipe",
         timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
       });
@@ -268,17 +272,34 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
         }],
       });
 
-    execFileSync("composer", ["install", "--no-interaction", "--no-progress"], {
-      cwd: projectPath,
-      env: {
-        ...process.env,
-        COMPOSER_HOME: composerHome,
-      },
-      stdio: "pipe",
-      timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
-    });
+    try {
+      execFileSync("composer", [
+        "install",
+        "--no-interaction",
+        "--no-plugins",
+        "--no-progress",
+        "--no-scripts",
+        "--prefer-dist",
+      ], {
+        cwd: projectPath,
+        env: {
+          ...process.env,
+          COMPOSER_CACHE_DIR: join(composerHome, "cache"),
+          COMPOSER_HOME: composerHome,
+          COMPOSER_NO_INTERACTION: "1",
+        },
+        maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
+        stdio: "pipe",
+        timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
+      });
+    } finally {
+      rmSync(composerHome, { recursive: true, force: true });
+      temporaryPaths.splice(temporaryPaths.indexOf(composerHome), 1);
+    }
+
     execFileSync("php", ["verify.php"], {
       cwd: projectPath,
+      maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
       stdio: "inherit",
       timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
     });

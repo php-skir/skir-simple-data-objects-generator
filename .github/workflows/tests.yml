@@ -40,6 +40,10 @@ jobs:
           repository: php-skir/runtime
           path: runtime
 
+      - name: Test coverage badge publisher
+        working-directory: generator
+        run: bash .github/scripts/publish-coverage-badge.test.sh
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -63,7 +67,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: generator
-        run: npm install --no-save ../generator-core
+        run: |
+          npm ci
+          npm install --no-save --package-lock=false ../generator-core
 
       - name: Typecheck
         working-directory: generator
@@ -85,14 +91,8 @@ jobs:
 
   coverage:
     name: Coverage
-    if: github.ref == 'refs/heads/main'
     needs: tests
     runs-on: ubuntu-latest
-    concurrency:
-      group: coverage-badge
-      cancel-in-progress: false
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout generator
@@ -135,7 +135,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: generator
-        run: npm install --no-save ../generator-core
+        run: |
+          npm ci
+          npm install --no-save --package-lock=false ../generator-core
 
       - name: Measure coverage
         working-directory: generator
@@ -148,6 +150,36 @@ jobs:
         run: |
           percentage=$(node -p 'JSON.parse(require("node:fs").readFileSync("coverage/coverage-summary.json", "utf8")).total.lines.pct')
           node .github/scripts/write-coverage-badge.mjs "$percentage" build/coverage.svg
+
+      - name: Upload coverage badge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-badge
+          path: generator/build/coverage.svg
+          if-no-files-found: error
+
+  badge:
+    name: Publish coverage badge
+    if: github.ref == 'refs/heads/main'
+    needs: coverage
+    runs-on: ubuntu-latest
+    concurrency:
+      group: coverage-badge
+      cancel-in-progress: false
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout generator
+        uses: actions/checkout@v7
+        with:
+          path: generator
+
+      - name: Download coverage badge artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-badge
+          path: generator/build
 
       - name: Publish coverage badge
         working-directory: generator

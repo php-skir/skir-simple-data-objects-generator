@@ -1,3 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { generateSimpleDataObjectsFiles } from "../src/generator.js";
@@ -343,5 +348,54 @@ describe("generateSimpleDataObjectsFiles", () => {
         }],
       }],
     })).toThrow("Simple Data Objects RPC generation is not implemented until Task 15.");
+  });
+
+  it("preplans and aliases enum collection imports that collide with generated records", () => {
+    const files = generateSimpleDataObjectsFiles({
+      modules: [{
+        path: "collision.skir",
+        records: [{
+          kind: "struct",
+          key: "collection-key",
+          name: "CollectionItem",
+          phpClassName: "TypedDataCollection",
+          fields: [
+            { kind: "field", name: "name", number: 0, type: { kind: "string" } },
+          ],
+        }, {
+          recordType: "enum",
+          name: "CollectionEvent",
+          fields: [{
+            kind: "field",
+            name: "collected",
+            number: 1,
+            type: {
+              kind: "array",
+              item: {
+                kind: "record",
+                key: "collection-key",
+                name: "CollectionItem",
+              },
+            },
+          }],
+        }],
+      }],
+    });
+    const source = files.find((file) => file.path === "CollectionEventData.php")?.code ?? "";
+    const lintDirectory = mkdtempSync(join(tmpdir(), "skir-sdo-enum-import-"));
+    const lintFile = join(lintDirectory, "CollectionEventData.php");
+
+    expect(source).toContain(
+      "use StdOut\\SimpleDataObjects\\TypedDataCollection as SimpleDataObjectsTypedDataCollection;",
+    );
+    expect(source).toContain(
+      "public static function collected(SimpleDataObjectsTypedDataCollection $value): self",
+    );
+    expect(source).toContain(
+      "SimpleDataObjectsTypedDataCollection::of(TypedDataCollection::class, array_map(",
+    );
+
+    writeFileSync(lintFile, source);
+    expect(() => execFileSync("php", ["-l", lintFile], { stdio: "pipe" })).not.toThrow();
   });
 });

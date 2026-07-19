@@ -75,6 +75,20 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
     return imports;
   }
 
+  public enumImports(record: NormalizedRecord): readonly string[] {
+    if (record.recordType !== "enum") {
+      return [];
+    }
+
+    const needsTypedDataCollection = record.fields.some((field) => (
+      field.kind === "field"
+      && field.hasPayload
+      && requiresEnumTypedDataCollection(field.type)
+    ));
+
+    return needsTypedDataCollection ? [TYPED_DATA_COLLECTION] : [];
+  }
+
   public renderStruct({ record, context }: StructRenderRequest): GeneratedFile {
     if (record.recordType !== "struct") {
       throw new Error(`Cannot render non-struct record ${record.identity} as a struct.`);
@@ -538,6 +552,14 @@ function isDirectStructCollection(
   return type.kind === "array"
     && type.item.kind === "record"
     && type.item.recordType === "struct";
+}
+
+function requiresEnumTypedDataCollection(type: NormalizedType): boolean {
+  if (type.kind === "optional") {
+    return requiresEnumTypedDataCollection(type.inner);
+  }
+
+  return isDirectStructCollection(type);
 }
 
 function phpSingleQuotedLiteral(value: string): string {

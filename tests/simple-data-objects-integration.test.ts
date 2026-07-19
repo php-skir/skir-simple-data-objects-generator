@@ -59,6 +59,11 @@ describe("generated Simple Data Objects", () => {
             CompanyContact: {
               email: ["company_email"],
             },
+            ControlRules: {
+              line_feed: ["line\nfeed"],
+              carriage_return: ["carriage\rreturn"],
+              both: ["both\r\nlines"],
+            },
           },
         },
       },
@@ -89,6 +94,15 @@ describe("generated Simple Data Objects", () => {
             },
             {
               kind: "struct",
+              name: "ControlRules",
+              fields: [
+                { kind: "field", name: "line_feed", number: 0, type: { kind: "string" } },
+                { kind: "field", name: "carriage_return", number: 1, type: { kind: "string" } },
+                { kind: "field", name: "both", number: 2, type: { kind: "string" } },
+              ],
+            },
+            {
+              kind: "struct",
               name: "User",
               fields: [
                 { kind: "field", name: "user_id", number: 0, type: { kind: "int32" } },
@@ -110,6 +124,18 @@ describe("generated Simple Data Objects", () => {
               fields: [
                 { kind: "field", name: "free", number: 1 },
                 { kind: "field", name: "premium_since", number: 2, type: { kind: "timestamp" } },
+              ],
+            },
+            {
+              recordType: "enum",
+              name: "AddressEvent",
+              fields: [
+                { kind: "field", name: "moved_to", number: 1, type: { kind: "record", key: "address-key", name: "Address" } },
+                { kind: "field", name: "visited", number: 2, type: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } } },
+                { kind: "field", name: "maybe_moved_to", number: 3, type: { kind: "optional", other: { kind: "record", key: "address-key", name: "Address" } } },
+                { kind: "field", name: "maybe_visited", number: 4, type: { kind: "optional", other: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } } } },
+                { kind: "field", name: "routes", number: 5, type: { kind: "array", item: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } } } },
+                { kind: "field", name: "status_changed", number: 6, type: { kind: "record", name: "SubscriptionStatus", recordType: "enum" } },
               ],
             },
           ],
@@ -134,7 +160,9 @@ declare(strict_types=1);
 require __DIR__.'/vendor/autoload.php';
 
 use App\\Skir\\AddressData;
+use App\\Skir\\AddressEventData;
 use App\\Skir\\CompanyContactData;
+use App\\Skir\\ControlRulesData;
 use App\\Skir\\HealthCheckRequestData;
 use App\\Skir\\SubscriptionStatusData;
 use App\\Skir\\UserData;
@@ -142,12 +170,37 @@ use Illuminate\\Translation\\ArrayLoader;
 use Illuminate\\Translation\\Translator;
 use Illuminate\\Validation\\Factory as ValidatorFactory;
 use Illuminate\\Validation\\ValidationException;
+use Skir\\Runtime\\EnumValue;
 use StdOut\\SimpleDataObjects\\BaseData;
+use StdOut\\SimpleDataObjects\\Attributes\\Rules;
 use StdOut\\SimpleDataObjects\\TypedDataCollection;
 
 $validator = new ValidatorFactory(new Translator(new ArrayLoader(), 'en'));
 $validator->extend('company_email', static fn (string $attribute, mixed $value): bool => is_string($value) && str_ends_with($value, '@company.test'));
 BaseData::setValidatorFactory($validator);
+
+$controlParameters = (new ReflectionClass(ControlRulesData::class))
+    ->getConstructor()
+    ->getParameters();
+$controlRules = array_map(
+    static fn (ReflectionParameter $parameter): array => $parameter
+        ->getAttributes(Rules::class)[0]
+        ->newInstance()
+        ->rules,
+    $controlParameters,
+);
+
+if ($controlRules[0][2] !== "line\nfeed") {
+    throw new RuntimeException('LF validation rule value changed.');
+}
+
+if ($controlRules[1][2] !== "carriage\rreturn") {
+    throw new RuntimeException('CR validation rule value changed.');
+}
+
+if ($controlRules[2][2] !== "both\r\nlines") {
+    throw new RuntimeException('CRLF validation rule value changed.');
+}
 
 $contact = CompanyContactData::makeFromSkirPayload(['email' => 'maxim@company.test']);
 
@@ -214,13 +267,21 @@ if (! $user->equals(UserData::from($user->toArray()))) {
     throw new RuntimeException('Unexpected equality behavior for equivalent data.');
 }
 
-$userWithoutOptionalAddresses = UserData::makeFromSkirPayload([
-    ...$payload,
-    'optional_addresses' => null,
-]);
+$payloadWithoutOptionals = $payload;
+unset($payloadWithoutOptionals['optional_addresses'], $payloadWithoutOptionals['nickname']);
 
-if ($userWithoutOptionalAddresses->optionalAddresses !== null) {
-    throw new RuntimeException('Unexpected nullable typed collection hydration.');
+set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+
+try {
+    $userWithoutOptionalAddresses = UserData::makeFromSkirPayload($payloadWithoutOptionals);
+} finally {
+    restore_error_handler();
+}
+
+if ($userWithoutOptionalAddresses->optionalAddresses !== null || $userWithoutOptionalAddresses->nickname !== null) {
+    throw new RuntimeException('Unexpected omitted optional hydration.');
 }
 
 $json = $user->toSkirJson();
@@ -232,6 +293,72 @@ if ($decoded->userId !== $user->userId || $decoded->address->city !== $user->add
 
 if ((new HealthCheckRequestData())->toSkirJson() !== '[]') {
     throw new RuntimeException('Unexpected empty struct dense JSON.');
+}
+
+$movedTo = AddressEventData::movedTo(
+    AddressData::makeFromSkirPayload(['city' => 'Kortrijk', 'postal_codes' => ['8500']]),
+);
+
+if (! is_array($movedTo->toSkirValue()->value)) {
+    throw new RuntimeException('Direct enum struct payload was not stored as wire data.');
+}
+
+$decodedMovedTo = AddressEventData::fromDenseJson($movedTo->toDenseJson())->payload();
+
+if (! $decodedMovedTo instanceof AddressData || $decodedMovedTo->city !== 'Kortrijk') {
+    throw new RuntimeException('Direct enum struct payload did not round trip.');
+}
+
+$visited = AddressEventData::visited($user->previousAddresses);
+
+if (! is_array($visited->toSkirValue()->value)) {
+    throw new RuntimeException('Enum collection payload was not stored as wire data.');
+}
+
+$decodedVisited = AddressEventData::fromDenseJson($visited->toDenseJson())->payload();
+
+if (! $decodedVisited instanceof TypedDataCollection || count($decodedVisited) !== 2 || ! $decodedVisited->all()[0] instanceof AddressData) {
+    throw new RuntimeException('Enum typed collection payload did not round trip.');
+}
+
+$maybeMovedTo = AddressEventData::maybeMovedTo($user->address);
+$decodedMaybeMovedTo = AddressEventData::fromDenseJson($maybeMovedTo->toDenseJson())->payload();
+
+if (! $decodedMaybeMovedTo instanceof AddressData || $decodedMaybeMovedTo->city !== 'Antwerp') {
+    throw new RuntimeException('Optional enum struct payload did not round trip.');
+}
+
+$maybeVisited = AddressEventData::maybeVisited($user->previousAddresses);
+$decodedMaybeVisited = AddressEventData::fromDenseJson($maybeVisited->toDenseJson())->payload();
+
+if (! $decodedMaybeVisited instanceof TypedDataCollection || count($decodedMaybeVisited) !== 2) {
+    throw new RuntimeException('Optional enum typed collection did not round trip.');
+}
+
+if (AddressEventData::maybeVisited(null)->payload() !== null) {
+    throw new RuntimeException('Null optional enum typed collection changed.');
+}
+
+$routes = AddressEventData::routes([[$user->address]]);
+$decodedRoutes = AddressEventData::fromDenseJson($routes->toDenseJson())->payload();
+
+if (! is_array($routes->toSkirValue()->value) || ! $decodedRoutes[0][0] instanceof AddressData) {
+    throw new RuntimeException('Nested enum struct arrays did not round trip.');
+}
+
+$statusChanged = AddressEventData::statusChanged(SubscriptionStatusData::free());
+$decodedStatus = AddressEventData::fromDenseJson($statusChanged->toDenseJson())->payload();
+
+if (! $decodedStatus instanceof SubscriptionStatusData || $decodedStatus->name() !== 'free') {
+    throw new RuntimeException('Nested enum payload did not round trip.');
+}
+
+try {
+    AddressEventData::fromSkirValue(
+        EnumValue::wrapper('moved_to', ['city' => 42, 'postal_codes' => ['8500']]),
+    )->payload();
+    throw new RuntimeException('Expected enum struct payload validation to fail.');
+} catch (ValidationException) {
 }
 
 try {
@@ -263,7 +390,9 @@ try {
 
     expect(files.map((file) => file.path).sort()).toEqual([
       "AddressData.php",
+      "AddressEventData.php",
       "CompanyContactData.php",
+      "ControlRulesData.php",
       "HealthCheckRequestData.php",
       "SubscriptionStatusData.php",
       "UserData.php",

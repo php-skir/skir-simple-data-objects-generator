@@ -163,27 +163,42 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
   }
 
   public fromSkirExpression(
-    type: NormalizedType,
-    expression: string,
-    context: RenderContext,
+    _type: NormalizedType,
+    _expression: string,
+    _context: RenderContext,
   ): string {
-    return valueFromSkirPayloadExpression(type, expression, context);
+    return unsupportedRpcGeneration();
   }
 
   public clientResponseExpression(
+    _type: NormalizedType,
+    _expression: string,
+    _context: RenderContext,
+  ): string {
+    return unsupportedRpcGeneration();
+  }
+
+  public enumPayloadToSkirExpression(
     type: NormalizedType,
     expression: string,
     context: RenderContext,
   ): string {
-    return valueFromSkirPayloadExpression(type, expression, context);
+    return this.toSkirValueExpression(type, expression, context, true);
   }
 
-  public manifestObjectClass(type: NormalizedType, context: RenderContext): string | null {
-    if (type.kind !== "record") {
-      return null;
-    }
+  public enumPayloadFromSkirExpression(
+    type: NormalizedType,
+    expression: string,
+    context: RenderContext,
+  ): string {
+    return valueFromEnumPayloadExpression(type, expression, context);
+  }
 
-    return fullyQualifiedRecordClassName(type, context);
+  public manifestObjectClass(
+    _type: NormalizedType,
+    _context: RenderContext,
+  ): string | null {
+    return unsupportedRpcGeneration();
   }
 
   private renderConstructor(
@@ -401,9 +416,12 @@ function propertyAttributes(
 
 function renderPayloadEntry(field: NormalizedField, context: RenderContext): string {
   const fieldLiteral = phpSingleQuotedLiteral(field.name);
+  const directExpression = `$data[${fieldLiteral}]`;
   const expression = valueFromSkirPayloadExpression(
     field.type,
-    `$data[${fieldLiteral}]`,
+    field.type.kind === "optional"
+      ? `${directExpression} ?? null`
+      : directExpression,
     context,
   );
 
@@ -432,7 +450,7 @@ function valueFromSkirPayloadExpression(
 
   if (type.kind === "optional") {
     if (isRecursivelyMappedType(type.inner)) {
-      return `${expression} === null ? null : ${valueFromSkirPayloadExpression(type.inner, expression, context)}`;
+      return `(${expression}) === null ? null : ${valueFromSkirPayloadExpression(type.inner, expression, context)}`;
     }
 
     return expression;
@@ -446,6 +464,26 @@ function valueFromSkirPayloadExpression(
   }
 
   return expression;
+}
+
+function valueFromEnumPayloadExpression(
+  type: NormalizedType,
+  expression: string,
+  context: RenderContext,
+): string {
+  if (isDirectStructCollection(type)) {
+    const typedDataCollection = importClass(context.imports, TYPED_DATA_COLLECTION);
+    const collectionClass = recordTypeClassName(type.item, context);
+    const hydratedItems = valueFromSkirPayloadExpression(type, expression, context);
+
+    return `${typedDataCollection}::of(${collectionClass}::class, ${hydratedItems})`;
+  }
+
+  if (type.kind === "optional") {
+    return `${expression} === null ? null : ${valueFromEnumPayloadExpression(type.inner, expression, context)}`;
+  }
+
+  return valueFromSkirPayloadExpression(type, expression, context);
 }
 
 function hydrationArrowTypes(
@@ -503,6 +541,31 @@ function isDirectStructCollection(
 }
 
 function phpSingleQuotedLiteral(value: string): string {
+  const expressions: string[] = [];
+  let segment = "";
+
+  for (const character of value) {
+    if (character !== "\n" && character !== "\r") {
+      segment += character;
+      continue;
+    }
+
+    if (segment !== "") {
+      expressions.push(escapedPhpStringSegment(segment));
+      segment = "";
+    }
+
+    expressions.push(character === "\n" ? '"\\n"' : '"\\r"');
+  }
+
+  if (segment !== "" || expressions.length === 0) {
+    expressions.push(escapedPhpStringSegment(segment));
+  }
+
+  return expressions.join(".");
+}
+
+function escapedPhpStringSegment(value: string): string {
   return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
 }
 
@@ -604,22 +667,6 @@ function recordTypeClassName(
     : `\\${fullyQualifiedClassName}`;
 }
 
-function fullyQualifiedRecordClassName(
-  type: Extract<NormalizedType, { readonly kind: "record" }>,
-  context: RenderContext,
-): string {
-  const className = context.names.namesByIdentity.get(type.recordIdentity);
-
-  if (className === undefined) {
-    throw new Error(`No PHP class name was resolved for record ${type.recordIdentity}.`);
-  }
-
-  return canonicalRecordClassName(
-    recordNamespace(type.recordIdentity, context.rootNamespace),
-    className,
-  );
-}
-
 function canonicalRecordClassName(namespace: string, className: string): string {
   const fullyQualifiedClassName = `${namespace}\\${className}`.replace(/^\\+/u, "");
   const parts = fullyQualifiedClassName.split("\\");
@@ -656,4 +703,8 @@ function recordNamespace(recordIdentity: string, rootNamespace: string): string 
 
 function outputPath(context: RenderContext, fileName: string): string {
   return context.pathPrefix === "" ? fileName : `${context.pathPrefix}/${fileName}`;
+}
+
+function unsupportedRpcGeneration(): never {
+  throw new Error("Simple Data Objects RPC generation is not implemented until Task 15.");
 }

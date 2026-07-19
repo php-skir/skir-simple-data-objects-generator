@@ -165,6 +165,8 @@ describe("generateSimpleDataObjectsFiles", () => {
     );
     expect(user).toContain("'previous_addresses' => array_map(");
     expect(user).toContain("AddressData::makeFromSkirPayload($item)");
+    expect(user).toContain("'nickname' => $data['nickname'] ?? null,");
+    expect(user).toContain("($data['optional_addresses'] ?? null) === null ? null : array_map(");
     expect(user).toContain("'status' => SubscriptionStatusData::fromSkirValue($data['status'])");
     expect(user).toContain("return self::from($payload);");
     expect(user).toContain("public static function fromSkir(string $json): UserData");
@@ -236,5 +238,110 @@ describe("generateSimpleDataObjectsFiles", () => {
         },
       ],
     })).toThrow('Unknown validation field "users.skir::User.missing".');
+  });
+
+  it("preserves LF, CR, and CRLF validation rule values with constant expressions", () => {
+    const files = generateSimpleDataObjectsFiles({
+      config: {
+        validation: {
+          "rules.skir": {
+            ControlRules: {
+              line_feed: ["line\nfeed"],
+              carriage_return: ["carriage\rreturn"],
+              both: ["both\r\nlines"],
+            },
+          },
+        },
+      },
+      modules: [{
+        path: "rules.skir",
+        records: [{
+          kind: "struct",
+          name: "ControlRules",
+          fields: [
+            { kind: "field", name: "line_feed", number: 0, type: { kind: "string" } },
+            { kind: "field", name: "carriage_return", number: 1, type: { kind: "string" } },
+            { kind: "field", name: "both", number: 2, type: { kind: "string" } },
+          ],
+        }],
+      }],
+    });
+    const source = files.find((file) => file.path === "ControlRulesData.php")?.code ?? "";
+
+    expect(source).toContain("#[Rules(['required', 'string', 'line'.\"\\n\".'feed'])]");
+    expect(source).toContain("#[Rules(['required', 'string', 'carriage'.\"\\r\".'return'])]");
+    expect(source).toContain("#[Rules(['required', 'string', 'both'.\"\\r\".\"\\n\".'lines'])]");
+  });
+
+  it("converts complex wrapper enum payloads between wire and target representations", () => {
+    const files = generateSimpleDataObjectsFiles({
+      modules: [{
+        path: "events.skir",
+        records: [{
+          kind: "struct",
+          key: "address-key",
+          name: "Address",
+          fields: [
+            { kind: "field", name: "city", number: 0, type: { kind: "string" } },
+          ],
+        }, {
+          recordType: "enum",
+          name: "AddressEvent",
+          fields: [{
+            kind: "field",
+            name: "moved_to",
+            number: 1,
+            type: { kind: "record", key: "address-key", name: "Address" },
+          }, {
+            kind: "field",
+            name: "visited",
+            number: 2,
+            type: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } },
+          }, {
+            kind: "field",
+            name: "maybe_moved_to",
+            number: 3,
+            type: { kind: "optional", other: { kind: "record", key: "address-key", name: "Address" } },
+          }, {
+            kind: "field",
+            name: "maybe_visited",
+            number: 4,
+            type: { kind: "optional", other: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } } },
+          }, {
+            kind: "field",
+            name: "routes",
+            number: 5,
+            type: { kind: "array", item: { kind: "array", item: { kind: "record", key: "address-key", name: "Address" } } },
+          }],
+        }],
+      }],
+    });
+    const source = files.find((file) => file.path === "AddressEventData.php")?.code ?? "";
+
+    expect(source).toContain("public static function movedTo(AddressData $value): self");
+    expect(source).toContain("EnumValue::wrapper('moved_to', $value->toSkirArray())");
+    expect(source).toContain("public static function visited(TypedDataCollection $value): self");
+    expect(source).toContain("$value->all()");
+    expect(source).toContain("'moved_to' => AddressData::makeFromSkirPayload($this->value->value),");
+    expect(source).toContain("'visited' => TypedDataCollection::of(AddressData::class, array_map(");
+    expect(source).toContain("'maybe_moved_to' => $this->value->value === null ? null : AddressData::makeFromSkirPayload($this->value->value),");
+    expect(source).toContain("public static function maybeVisited(?TypedDataCollection $value): self");
+    expect(source).toContain("'maybe_visited' => $this->value->value === null ? null : TypedDataCollection::of(AddressData::class, array_map(");
+    expect(source).toContain("'routes' => array_map(");
+  });
+
+  it("rejects RPC generation until the Task 15 adapter surface is implemented", () => {
+    expect(() => generateSimpleDataObjectsFiles({
+      modules: [{
+        path: "rpc.skir",
+        methods: [{
+          kind: "method",
+          name: "Ping",
+          number: 1,
+          requestType: { kind: "string" },
+          responseType: { kind: "string" },
+        }],
+      }],
+    })).toThrow("Simple Data Objects RPC generation is not implemented until Task 15.");
   });
 });

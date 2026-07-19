@@ -357,14 +357,3 @@ npm install --no-save --package-lock=false ../generator-core
 ```
 
 Once the compatible core package has been published and this repository has committed its normal `package-lock.json`, use `npm ci` instead of the local-path bootstrap.
-
-## Releasing
-
-Release the shared packages in dependency order:
-
-1. Merge and publish `@php-skir/generator-core` with the required adapter APIs.
-2. Replace the local link with the published compatible core version and commit the resulting `package-lock.json` update.
-3. Run `npm ci`, typecheck, build, package validation, the full test suite, and `git diff --check` again.
-4. Create the Simple Data Objects generator release only after those checks pass.
-
-The release workflow uses Node 24 and npm trusted publishing with provenance. Configure this GitHub repository as an npm trusted publisher before publishing; no release or publish action is performed by the test workflow.

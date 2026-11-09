@@ -63,13 +63,15 @@ jobs:
 
       - name: Build generator core
         working-directory: generator-core
-        run: npm run build
+        run: |
+          npm run build
+          npm pack
 
       - name: Install dependencies
         working-directory: generator
         run: |
           npm ci
-          npm install --no-save --package-lock=false ../generator-core
+          npm install --no-save ../generator-core/php-skir-generator-core-*.tgz
 
       - name: Typecheck
         working-directory: generator
@@ -131,13 +133,15 @@ jobs:
 
       - name: Build generator core
         working-directory: generator-core
-        run: npm run build
+        run: |
+          npm run build
+          npm pack
 
       - name: Install dependencies
         working-directory: generator
         run: |
           npm ci
-          npm install --no-save --package-lock=false ../generator-core
+          npm install --no-save ../generator-core/php-skir-generator-core-*.tgz
 
       - name: Measure coverage
         working-directory: generator

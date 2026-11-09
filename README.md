@@ -122,10 +122,13 @@ Every Skir struct generates a final class extending `StdOut\SimpleDataObjects\Ba
 | --- | --- |
 | `skirType()` | Return the runtime `Type` descriptor. |
 | `makeFromSkirPayload(array $data)` | Validate raw named Skir data, recursively hydrate nested values, and return the DTO. |
-| `fromSkir(string $json)` | Decode dense Skir JSON and delegate to `makeFromSkirPayload()`. |
+| `fromSkir(string $json)` | Decode dense or readable Skir JSON and delegate to `makeFromSkirPayload()`. There is no separate `fromReadableJson()`. |
 | `toSkirArray()` | Convert DTO values to the named array representation expected by the runtime. |
 | `toSkir()` | Encode the DTO as the dense PHP array representation. |
 | `toSkirJson()` | Encode the DTO as dense Skir JSON. |
+| `toReadableJson()` | Encode the DTO as readable Skir JSON. |
+| `toBytes()` | Encode the DTO in the Skir binary format. |
+| `fromBytes(string $bytes)` | Decode the Skir binary format and delegate to `makeFromSkirPayload()`, so validation applies. |
 
 Generated classes inherit the current `BaseData` APIs, including `from()`, `fromValidated()`, `validate()`, `toArray()`, `toJson()`, `with()`, `equals()`, `diff()`, `only()`, `except()`, `collection()`, and `lazyCollection()`.
 
@@ -176,7 +179,7 @@ Nested arrays and arrays whose item is optional remain normal PHP arrays, althou
 
 ### Wrapper enums
 
-Skir enums generate readonly wrapper classes with a `Data` suffix. Constant variants have parameterless named constructors; payload variants have typed named constructors. Generated enum classes expose `name()`, `payload()`, `skirType()`, `toSkirValue()`, `fromSkirValue()`, `toDenseValue()`, `fromDenseValue()`, `toDenseJson()`, and `fromDenseJson()`.
+Skir enums generate readonly wrapper classes with a `Data` suffix. Constant variants have parameterless named constructors; payload variants have typed named constructors. Generated enum classes expose `name()`, `payload()`, `skirType()`, `toSkirValue()`, `fromSkirValue()`, `toDenseValue()`, `fromDenseValue()`, `toDenseJson()`, `fromDenseJson()`, `toReadableJson()`, `toBytes()`, and `fromBytes()`. `fromDenseJson()` accepts both dense and readable JSON.
 
 Structs, typed struct collections, nested arrays, optionals, and nested enum wrappers are converted to wire values when stored in a wrapper and converted back to target DTO values when `payload()` is read.
 

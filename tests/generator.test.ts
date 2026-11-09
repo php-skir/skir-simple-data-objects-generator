@@ -49,8 +49,10 @@ describe("generateSimpleDataObjectsFiles", () => {
       "",
       "namespace Skir\\Health;",
       "",
+      "use Skir\\Runtime\\BinaryFormat;",
       "use Skir\\Runtime\\DenseJson;",
       "use Skir\\Runtime\\Field;",
+      "use Skir\\Runtime\\ReadableJson;",
       "use Skir\\Runtime\\Type;",
       "use StdOut\\SimpleDataObjects\\BaseData;",
       "",
@@ -93,6 +95,23 @@ describe("generateSimpleDataObjectsFiles", () => {
       "    public function toSkirJson(): string",
       "    {",
       "        return DenseJson::toJson(self::skirType(), $this->toSkirArray());",
+      "    }",
+      "",
+      "    public function toReadableJson(): string",
+      "    {",
+      "        return ReadableJson::toJson(self::skirType(), $this->toSkirArray());",
+      "    }",
+      "",
+      "    public function toBytes(): string",
+      "    {",
+      "        return BinaryFormat::encode(self::skirType(), $this->toSkirArray());",
+      "    }",
+      "",
+      "    public static function fromBytes(string $bytes): HealthRequestData",
+      "    {",
+      "        $data = BinaryFormat::decode(self::skirType(), $bytes);",
+      "",
+      "        return self::makeFromSkirPayload($data);",
       "    }",
       "}",
       "",
@@ -189,6 +208,9 @@ describe("generateSimpleDataObjectsFiles", () => {
     expect(user).toContain("$this->previousAddresses->all()");
     expect(user).toContain("public function toSkir(): array");
     expect(user).toContain("public function toSkirJson(): string");
+    expect(user).toContain("public function toReadableJson(): string");
+    expect(user).toContain("public function toBytes(): string");
+    expect(user).toContain("public static function fromBytes(string $bytes): UserData");
     expect(status).toContain("final readonly class SubscriptionStatusData");
     expect(status).toContain("public static function premiumSince(int $value): self");
   });

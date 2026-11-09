@@ -360,6 +360,18 @@ try {
 } catch (ValidationException) {
 }
 
+$bytesDecodedContact = CompanyContactData::fromBytes($contact->toBytes());
+
+if ($bytesDecodedContact->email !== 'maxim@company.test') {
+    throw new RuntimeException('Unexpected binary decoded contact.');
+}
+
+try {
+    CompanyContactData::fromBytes((new CompanyContactData(email: 'maxim@example.test'))->toBytes());
+    throw new RuntimeException('Expected binary company email validation to fail.');
+} catch (ValidationException) {
+}
+
 $payload = [
     'user_id' => 400,
     'address' => ['city' => 'Antwerp', 'postal_codes' => ['2000', '2018']],
@@ -439,6 +451,71 @@ if ($decoded->userId !== $user->userId || $decoded->address->city !== $user->add
 
 if ((new HealthCheckRequestData())->toSkirJson() !== '[]') {
     throw new RuntimeException('Unexpected empty struct dense JSON.');
+}
+
+$premiumSince = [
+    'kind' => 'premium_since',
+    'value' => [
+        'unix_millis' => 1743682787000,
+        'formatted' => '2025-04-03T12:19:47.000Z',
+    ],
+];
+$readableUser = json_decode($user->toReadableJson(), true, flags: JSON_THROW_ON_ERROR);
+
+if (
+    $readableUser['user_id'] !== 400
+    || $readableUser['address'] !== ['city' => 'Antwerp', 'postal_codes' => ['2000', '2018']]
+    || $readableUser['nullable_addresses'] !== [null, ['city' => 'Bruges', 'postal_codes' => ['8000']]]
+    || $readableUser['nested_addresses'] !== [[['city' => 'Hasselt', 'postal_codes' => ['3500']]]]
+    || $readableUser['status'] !== $premiumSince
+) {
+    throw new RuntimeException('Unexpected readable JSON: '.$user->toReadableJson());
+}
+
+if (UserData::fromSkir($user->toReadableJson())->toSkirJson() !== $json) {
+    throw new RuntimeException('Unexpected readable JSON round trip.');
+}
+
+if ((new HealthCheckRequestData())->toReadableJson() !== '{}') {
+    throw new RuntimeException('Unexpected empty struct readable JSON.');
+}
+
+// The binary format clamps int64 values to their range, so round-trip an in-range large_id.
+$binaryUser = $user->with(largeId: 9007199254740993);
+$bytes = $binaryUser->toBytes();
+
+if (! str_starts_with($bytes, 'skir')) {
+    throw new RuntimeException('Unexpected binary header: '.bin2hex($bytes));
+}
+
+$bytesDecoded = UserData::fromBytes($bytes);
+
+if ($bytesDecoded->toSkirJson() !== $binaryUser->toSkirJson() || $bytesDecoded->largeId !== 9007199254740993) {
+    throw new RuntimeException('Unexpected binary round trip: '.$bytesDecoded->toSkirJson());
+}
+
+if (! $bytesDecoded->previousAddresses instanceof TypedDataCollection || ! $bytesDecoded->nestedAddresses[0][0] instanceof AddressData) {
+    throw new RuntimeException('Unexpected binary decoded collections.');
+}
+
+if (! HealthCheckRequestData::fromBytes((new HealthCheckRequestData())->toBytes()) instanceof HealthCheckRequestData) {
+    throw new RuntimeException('Unexpected empty struct binary round trip.');
+}
+
+$status = SubscriptionStatusData::premiumSince(1743682787000);
+
+if (json_decode($status->toReadableJson(), true, flags: JSON_THROW_ON_ERROR) !== $premiumSince) {
+    throw new RuntimeException('Unexpected enum readable JSON: '.$status->toReadableJson());
+}
+
+if (SubscriptionStatusData::free()->toReadableJson() !== '"free"') {
+    throw new RuntimeException('Unexpected constant enum readable JSON.');
+}
+
+$bytesDecodedStatus = SubscriptionStatusData::fromBytes($status->toBytes());
+
+if ($bytesDecodedStatus->name() !== 'premium_since' || $bytesDecodedStatus->payload() !== 1743682787000) {
+    throw new RuntimeException('Unexpected binary decoded enum.');
 }
 
 $movedTo = AddressEventData::movedTo(
@@ -537,6 +614,12 @@ $abstractResponse = $abstractServer->invoke('SyncAddresses', $payload['previous_
 
 if (! is_array($abstractResponse) || $abstractResponse[1]['city'] !== 'Ghent') {
     throw new RuntimeException('The generated abstract provider collection boundary failed.');
+}
+
+$bytesDecodedVisited = AddressEventData::fromBytes($visited->toBytes())->payload();
+
+if (! $bytesDecodedVisited instanceof TypedDataCollection || count($bytesDecodedVisited) !== 2 || ! $bytesDecodedVisited->all()[1] instanceof AddressData) {
+    throw new RuntimeException('Enum typed collection payload did not round trip through binary.');
 }
 
 $statusChanged = AddressEventData::statusChanged(SubscriptionStatusData::free());

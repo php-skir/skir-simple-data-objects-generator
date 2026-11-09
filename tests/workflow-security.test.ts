@@ -130,7 +130,7 @@ describe("workflow trust boundaries", () => {
       },
       {
         name: "Publish",
-        run: "npm publish release-package/skir-simple-data-objects-generator-*.tgz --provenance --access public --ignore-scripts",
+        run: "npm publish ./release-package/skir-simple-data-objects-generator-*.tgz --provenance --access public --ignore-scripts",
       },
     ]);
   });

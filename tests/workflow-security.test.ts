@@ -151,7 +151,7 @@ describe("workflow trust boundaries", () => {
     });
     expect(commandLines(workflowStep(tests, "Install dependencies"))).toEqual([
       "npm ci",
-      "npm install --no-save --package-lock=false ../generator-core",
+      "npm install --no-save ../generator-core/php-skir-generator-core-*.tgz",
     ]);
     expect(workflowStep(tests, "Test coverage badge publisher")).toEqual({
       name: "Test coverage badge publisher",

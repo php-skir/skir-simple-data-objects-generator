@@ -47,7 +47,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@php-skir/generator-core": "^0.1.0",
+    "@php-skir/generator-core": "^0.2.0",
     "skir-internal": "^0.2.21",
     "zod": "^4.0.0"
   },

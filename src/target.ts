@@ -24,15 +24,24 @@ import {
 import { GENERATOR_MODULE } from "./config.js";
 import { structuralRules } from "./structural-rules.js";
 
+const BINARY_FORMAT = "Skir\\Runtime\\BinaryFormat";
 const DENSE_JSON = "Skir\\Runtime\\DenseJson";
 const FIELD = "Skir\\Runtime\\Field";
+const READABLE_JSON = "Skir\\Runtime\\ReadableJson";
 const TYPE = "Skir\\Runtime\\Type";
 const DATA_COLLECTION = "StdOut\\SimpleDataObjects\\Attributes\\DataCollection";
 const MAP_PROPERTY_NAME = "StdOut\\SimpleDataObjects\\Attributes\\MapPropertyName";
 const RULES = "StdOut\\SimpleDataObjects\\Attributes\\Rules";
 const BASE_DATA = "StdOut\\SimpleDataObjects\\BaseData";
 const TYPED_DATA_COLLECTION = "StdOut\\SimpleDataObjects\\TypedDataCollection";
-const BASE_STRUCT_IMPORTS = [DENSE_JSON, FIELD, TYPE, BASE_DATA] as const;
+const BASE_STRUCT_IMPORTS = [
+  BINARY_FORMAT,
+  DENSE_JSON,
+  FIELD,
+  READABLE_JSON,
+  TYPE,
+  BASE_DATA,
+] as const;
 
 export class SimpleDataObjectsTarget implements PhpTargetAdapter {
   public readonly id = GENERATOR_MODULE;
@@ -106,8 +115,10 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
 
     const className = classNameForRecord(record, context);
     const imports = this.structImports(record);
+    const binaryFormat = importClass(context.imports, BINARY_FORMAT);
     const denseJson = importClass(context.imports, DENSE_JSON);
     const fieldClass = importClass(context.imports, FIELD);
+    const readableJson = importClass(context.imports, READABLE_JSON);
     const typeClass = importClass(context.imports, TYPE);
     const baseData = importClass(context.imports, BASE_DATA);
     const fields = record.fields.filter(isStructField);
@@ -120,6 +131,9 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
       this.renderToSkirArray(fields, context),
       this.renderToSkir(denseJson),
       this.renderToSkirJson(denseJson),
+      this.renderToReadableJson(readableJson),
+      this.renderToBytes(binaryFormat),
+      this.renderFromBytes(className, binaryFormat),
     ].filter((member): member is string => member !== null);
     const body = [
       `final class ${className} extends ${baseData}`,
@@ -388,6 +402,35 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
       "public function toSkirJson(): string",
       "{",
       `    return ${denseJson}::toJson(self::skirType(), $this->toSkirArray());`,
+      "}",
+    ].join("\n");
+  }
+
+  private renderToReadableJson(readableJson: string): string {
+    return [
+      "public function toReadableJson(): string",
+      "{",
+      `    return ${readableJson}::toJson(self::skirType(), $this->toSkirArray());`,
+      "}",
+    ].join("\n");
+  }
+
+  private renderToBytes(binaryFormat: string): string {
+    return [
+      "public function toBytes(): string",
+      "{",
+      `    return ${binaryFormat}::encode(self::skirType(), $this->toSkirArray());`,
+      "}",
+    ].join("\n");
+  }
+
+  private renderFromBytes(className: string, binaryFormat: string): string {
+    return [
+      `public static function fromBytes(string $bytes): ${className}`,
+      "{",
+      `    $data = ${binaryFormat}::decode(self::skirType(), $bytes);`,
+      "",
+      "    return self::makeFromSkirPayload($data);",
       "}",
     ].join("\n");
   }

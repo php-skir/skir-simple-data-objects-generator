@@ -2,7 +2,9 @@ import {
   importClass,
   importClassAs,
   indent,
+  renderDocArgument,
   renderPhpFile,
+  renderRecordMetadataArguments,
   renderUseStatements,
   resolveValidationRules,
   toClassName,
@@ -296,14 +298,14 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
         throw new Error(`Struct field ${field.name} in ${record.identity} has no payload type.`);
       }
 
-      return `        ${fieldClass}::value(${phpSingleQuotedLiteral(field.name)}, ${field.number}, ${runtimeTypeExpression(field.type, context, this, typeClass)}),`;
+      return `        ${fieldClass}::value(${phpSingleQuotedLiteral(field.name)}, ${field.number}, ${runtimeTypeExpression(field.type, context, this, typeClass)}${renderDocArgument(field.doc)}),`;
     });
 
     if (entries.length === 0) {
       return [
         `public static function skirType(): ${typeClass}`,
         "{",
-        `    return ${typeClass}::struct([]);`,
+        `    return ${typeClass}::struct([]${renderRecordMetadataArguments(record)});`,
         "}",
       ].join("\n");
     }
@@ -313,7 +315,7 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
       "{",
       `    return ${typeClass}::struct([`,
       entries.join("\n"),
-      "    ]);",
+      `    ]${renderRecordMetadataArguments(record)});`,
       "}",
     ].join("\n");
   }

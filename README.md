@@ -18,7 +18,7 @@ Install Skir and this generator as development dependencies, then install the PH
 
 ```bash
 npm install --save-dev skir skir-simple-data-objects-generator
-composer require php-skir/runtime std-out/simple-data-objects
+composer require "php-skir/runtime:^0.2.1" std-out/simple-data-objects
 ```
 
 Create `skir-src/users.skir`:

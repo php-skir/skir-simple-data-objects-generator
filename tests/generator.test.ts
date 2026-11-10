@@ -60,7 +60,7 @@ describe("generateSimpleDataObjectsFiles", () => {
       "{",
       "    public static function skirType(): Type",
       "    {",
-      "        return Type::struct([]);",
+      "        return Type::struct([], recordId: 'health/health.skir:HealthRequest');",
       "    }",
       "",
       "    /** @param array<string, mixed> $data */",

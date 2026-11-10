@@ -52,8 +52,11 @@ describe("skir CLI integration", () => {
     writeFileSync(join(adminSourcePath, "users.skir"), [
       'import { Address } from "../common/address.skir";',
       "",
+      "/// A registered user.",
+      "/// It's \"quoted\" with a back\\slash.",
       "struct User {",
       "  user_id: int32;",
+      "  /// The user's display name.",
       "  name: string;",
       "  address: Address;",
       "  previous_addresses: [Address];",
@@ -61,13 +64,24 @@ describe("skir CLI integration", () => {
       "  nested_addresses: [[Address]];",
       "  nickname: string?;",
       "  subscription_status: SubscriptionStatus;",
+      "",
+      "  /// Per-user settings.",
+      "  struct Preferences {}",
+      "",
+      "  enum Role {",
+      "    admin;",
+      "    /// Read-only access.",
+      "    viewer;",
+      "  }",
       "}",
       "",
       "enum SubscriptionStatus {",
       "  free;",
+      "  /// When the premium plan started.",
       "  premium_since: timestamp;",
       "}",
       "",
+      "/// Returns the user.",
       "method GetUser(User): User = 3180856469;",
       "",
     ].join("\n"));
@@ -184,6 +198,42 @@ if ($method->name !== 'GetUser' || $method->number !== 3180856469) {
     throw new RuntimeException('Unexpected method descriptor.');
 }
 
+$memberDoc = static function (array $members, string $name): ?string {
+    foreach ($members as $member) {
+        if ($member->name === $name) {
+            return $member->doc;
+        }
+    }
+
+    throw new RuntimeException('No descriptor member named '.$name.'.');
+};
+$userType = \\Skir\\Admin\\UserData::skirType();
+$preferencesType = \\Skir\\Admin\\UserPreferencesData::skirType();
+$roleType = \\Skir\\Admin\\UserRoleData::skirType();
+$statusType = \\Skir\\Admin\\SubscriptionStatusData::skirType();
+$metadata = [
+    'struct record id' => [$userType->recordId, 'admin/users.skir:User'],
+    'struct doc' => [$userType->doc, "A registered user.\\nIt's \\"quoted\\" with a back\\\\slash."],
+    'field doc' => [$memberDoc($userType->fields, 'name'), "The user's display name."],
+    'undocumented field doc' => [$memberDoc($userType->fields, 'user_id'), null],
+    'nested empty struct record id' => [$preferencesType->recordId, 'admin/users.skir:User.Preferences'],
+    'nested empty struct doc' => [$preferencesType->doc, 'Per-user settings.'],
+    'nested enum record id' => [$roleType->recordId, 'admin/users.skir:User.Role'],
+    'undocumented enum doc' => [$roleType->doc, null],
+    'constant variant doc' => [$memberDoc($roleType->variants, 'viewer'), 'Read-only access.'],
+    'undocumented variant doc' => [$memberDoc($roleType->variants, 'admin'), null],
+    'enum record id' => [$statusType->recordId, 'admin/users.skir:SubscriptionStatus'],
+    'wrapper variant doc' => [$memberDoc($statusType->variants, 'premium_since'), 'When the premium plan started.'],
+    'imported struct record id' => [\\Skir\\Common\\AddressData::skirType()->recordId, 'common/address.skir:Address'],
+    'method doc' => [$method->doc, 'Returns the user.'],
+];
+
+foreach ($metadata as $label => [$actual, $expected]) {
+    if ($actual !== $expected) {
+        throw new RuntimeException('Unexpected '.$label.': '.var_export($actual, true));
+    }
+}
+
 $rpcUser = (new SkirRpcClient(new TransportSkirClient()))->getUser($user);
 
 if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof TypedDataCollection) {
@@ -246,6 +296,22 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
 
     const userCode = readFileSync(join(generatedPath, "Admin", "UserData.php"), "utf8");
     const clientCode = readFileSync(join(generatedPath, "Admin", "SkirRpcClient.php"), "utf8");
+    const preferencesCode = readFileSync(join(generatedPath, "Admin", "UserPreferencesData.php"), "utf8");
+    const roleCode = readFileSync(join(generatedPath, "Admin", "UserRoleData.php"), "utf8");
+    const methodDescriptorsCode = readFileSync(join(generatedPath, "Admin", "SkirMethods.php"), "utf8");
+
+    expect(userCode).toContain(
+      "], recordId: 'admin/users.skir:User', doc: 'A registered user.'.\"\\n\".'It\\'s \"quoted\" with a back\\\\slash.');",
+    );
+    expect(userCode).toContain("Field::value('user_id', 0, Type::int32()),");
+    expect(userCode).toContain("Field::value('name', 1, Type::string(), doc: 'The user\\'s display name.'),");
+    expect(preferencesCode).toMatch(
+      /Type::struct\(\[\s*\], recordId: 'admin\/users\.skir:User\.Preferences', doc: 'Per-user settings\.'\);/,
+    );
+    expect(roleCode).toContain("Variant::constant('admin', 1),");
+    expect(roleCode).toContain("Variant::constant('viewer', 2, doc: 'Read-only access.'),");
+    expect(roleCode).toContain("], recordId: 'admin/users.skir:User.Role');");
+    expect(methodDescriptorsCode).toContain("doc: 'Returns the user.',");
 
     expect(userCode).toContain("use Skir\\Common\\AddressData;");
     expect(userCode).toContain("public readonly TypedDataCollection $previousAddresses");

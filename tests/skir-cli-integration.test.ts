@@ -103,7 +103,7 @@ describe("skir CLI integration", () => {
       require: {
         php: "^8.4",
         "php-skir/runtime": "*",
-        "std-out/simple-data-objects": "^1.11",
+        "std-out/simple-data-objects": "^2.8",
       },
       autoload: {
         "psr-4": {
@@ -466,7 +466,7 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
       require: {
         php: "^8.4",
         "php-skir/runtime": "*",
-        "std-out/simple-data-objects": "^1.11",
+        "std-out/simple-data-objects": "^2.8",
       },
       autoload: {
         "psr-4": {

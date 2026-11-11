@@ -1,6 +1,6 @@
 {
   "name": "skir-simple-data-objects-generator",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Skir code generator for std-out/simple-data-objects.",
   "type": "module",
   "license": "MIT",

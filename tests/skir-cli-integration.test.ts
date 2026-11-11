@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -365,6 +365,188 @@ if (! $rpcUser instanceof UserData || ! $rpcUser->previousAddresses instanceof T
 
     execFileSync("php", ["verify.php"], {
       cwd: projectPath,
+      maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
+      stdio: "inherit",
+      timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
+    });
+  }, 180_000);
+  it("generates server and client-only output from two Skir roots sharing one skir-src", () => {
+    const projectPath = mkdtempSync(join(tmpdir(), "skir-sdo-generator-emit-"));
+    temporaryPaths.push(projectPath);
+    const composerHome = mkdtempSync(join(tmpdir(), "skir-sdo-generator-composer-"));
+    temporaryPaths.push(composerHome);
+    const runtimePath = process.env.SKIR_RUNTIME_PATH ?? resolve("../runtime");
+    const generatorModule = pathToFileURL(resolve("dist/index.js")).href;
+    const skirBinPath = resolve("node_modules/skir/dist/compiler.js");
+    const clientRootPath = join(projectPath, "skir", "internal-client");
+    const packagePath = join(projectPath, "packages", "internal-client");
+    const serverOutPath = join(projectPath, "skir", "php-internal", "skirout");
+    const clientOutPath = join(packagePath, "skirout");
+
+    mkdirSync(join(projectPath, "skir-src", "people"), { recursive: true });
+    mkdirSync(clientRootPath, { recursive: true });
+    mkdirSync(join(packagePath, "stub-client", "Skir", "Client"), { recursive: true });
+    symlinkSync(join("..", "..", "skir-src"), join(clientRootPath, "skir-src"));
+
+    writeFileSync(join(projectPath, "skir-src", "people", "person.skir"), [
+      "struct Person {",
+      "  name: string;",
+      "}",
+      "",
+      "method GetPerson(Person): Person = 1001;",
+      "",
+    ].join("\n"));
+    writeFileSync(join(projectPath, "skir.yml"), [
+      "generators:",
+      `  - mod: ${generatorModule}`,
+      "    outDir: ./skir/php-internal/skirout",
+      "    config:",
+      "      namespace: Skir",
+      "      emit: server",
+      "      validation:",
+      "        people/person.skir:",
+      "          Person:",
+      "            name: [person_name]",
+      "",
+    ].join("\n"));
+    writeFileSync(join(clientRootPath, "skir.yml"), [
+      "generators:",
+      `  - mod: ${generatorModule}`,
+      "    outDir: ../../packages/internal-client/skirout",
+      "    config:",
+      "      namespace: Trackr\\InternalClient",
+      "      emit: client",
+      "",
+    ].join("\n"));
+
+    for (const root of [projectPath, clientRootPath]) {
+      execFileSync("node", [skirBinPath, "gen", "--root", root], {
+        maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
+        stdio: "pipe",
+        timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
+      });
+    }
+
+    const listFiles = (path: string): string[] => readdirSync(path, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => join(entry.parentPath, entry.name).slice(path.length + 1))
+      .sort();
+
+    expect(listFiles(serverOutPath)).toEqual([
+      "People/AbstractSkirProcedures.php",
+      "People/PeopleSkirMethod.php",
+      "People/PersonData.php",
+      "People/SkirMethods.php",
+      "People/SkirProcedureProvider.php",
+      "People/SkirProcedures.php",
+      "skir-server-manifest.json",
+    ]);
+    expect(listFiles(clientOutPath)).toEqual([
+      "People/PersonData.php",
+      "People/SkirMethods.php",
+      "People/SkirRpcClient.php",
+    ]);
+    expect(readFileSync(join(serverOutPath, "People", "PersonData.php"), "utf8")).toContain("'person_name'");
+
+    for (const file of listFiles(clientOutPath)) {
+      const code = readFileSync(join(clientOutPath, file), "utf8");
+
+      expect(code).toContain("namespace Trackr\\InternalClient\\People;");
+      expect(code).not.toContain("Skir\\Server\\");
+      expect(code).not.toContain("person_name");
+    }
+
+    writeFileSync(join(packagePath, "composer.json"), JSON.stringify({
+      name: "trackr/internal-client",
+      repositories: [{
+        type: "path",
+        url: runtimePath,
+        options: { symlink: false },
+      }],
+      require: {
+        php: "^8.4",
+        "php-skir/runtime": "*",
+        "std-out/simple-data-objects": "^1.11",
+      },
+      autoload: {
+        "psr-4": {
+          "Skir\\Client\\": "stub-client/Skir/Client/",
+          "Trackr\\InternalClient\\": "skirout/",
+        },
+      },
+      "minimum-stability": "dev",
+      "prefer-stable": true,
+    }, null, 2));
+    writeFileSync(join(packagePath, "stub-client", "Skir", "Client", "SkirClient.php"), `<?php
+
+declare(strict_types=1);
+
+namespace Skir\\Client;
+
+use Skir\\Runtime\\MethodDescriptor;
+
+final class SkirClient
+{
+    public function invoke(MethodDescriptor $descriptor, mixed $request): mixed
+    {
+        return $request;
+    }
+}
+`);
+    writeFileSync(join(packagePath, "verify.php"), `<?php
+
+declare(strict_types=1);
+
+require __DIR__.'/vendor/autoload.php';
+
+use Illuminate\\Translation\\ArrayLoader;
+use Illuminate\\Translation\\Translator;
+use Illuminate\\Validation\\Factory as ValidatorFactory;
+use Skir\\Client\\SkirClient;
+use StdOut\\SimpleDataObjects\\BaseData;
+use Trackr\\InternalClient\\People\\PersonData;
+use Trackr\\InternalClient\\People\\SkirRpcClient;
+
+BaseData::setValidatorFactory(new ValidatorFactory(new Translator(new ArrayLoader(), 'en')));
+
+$person = (new SkirRpcClient(new SkirClient()))->getPerson(new PersonData(name: 'Ada'));
+
+if ($person->name !== 'Ada') {
+    throw new RuntimeException('Client-only response did not hydrate.');
+}
+
+if (interface_exists('Skir\\Server\\Contracts\\SkirMethodReference')) {
+    throw new RuntimeException('php-skir/server must not be installed for this check.');
+}
+`);
+
+    try {
+      execFileSync("composer", [
+        "install",
+        "--no-interaction",
+        "--no-plugins",
+        "--no-progress",
+        "--no-scripts",
+        "--prefer-dist",
+      ], {
+        cwd: packagePath,
+        env: {
+          ...process.env,
+          COMPOSER_CACHE_DIR: join(composerHome, "cache"),
+          COMPOSER_HOME: composerHome,
+          COMPOSER_NO_INTERACTION: "1",
+        },
+        maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
+        stdio: "pipe",
+        timeout: EXTERNAL_COMMAND_TIMEOUT_MS,
+      });
+    } finally {
+      rmSync(composerHome, { recursive: true, force: true });
+      temporaryPaths.splice(temporaryPaths.indexOf(composerHome), 1);
+    }
+
+    execFileSync("php", ["verify.php"], {
+      cwd: packagePath,
       maxBuffer: EXTERNAL_COMMAND_MAX_BUFFER_BYTES,
       stdio: "inherit",
       timeout: EXTERNAL_COMMAND_TIMEOUT_MS,

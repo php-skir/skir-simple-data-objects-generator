@@ -460,6 +460,45 @@ describe("generateSimpleDataObjectsFiles", () => {
     });
   });
 
+  it.each([
+    ["client", ["AddressData.php", "SkirMethods.php", "SkirRpcClient.php"]],
+    ["server", [
+      "AbstractSkirProcedures.php",
+      "AddressData.php",
+      "SkirMethod.php",
+      "SkirMethods.php",
+      "SkirProcedureProvider.php",
+      "SkirProcedures.php",
+      "skir-server-manifest.json",
+    ]],
+  ] as const)("emits only the shared and %s files", (emit, expectedPaths) => {
+    const files = generateSimpleDataObjectsFiles({
+      config: { emit },
+      modules: [{
+        path: "rpc.skir",
+        records: [{
+          kind: "struct",
+          key: "address-key",
+          name: "Address",
+          fields: [
+            { kind: "field", name: "city", number: 0, type: { kind: "string" } },
+          ],
+        }],
+        methods: [{
+          kind: "method",
+          name: "GetAddress",
+          number: 1,
+          requestType: { kind: "record", key: "address-key", name: "Address" },
+          responseType: { kind: "record", key: "address-key", name: "Address" },
+        }],
+      }],
+    });
+    const otherSide = emit === "client" ? "Skir\\Server\\" : "Skir\\Client\\";
+
+    expect(files.map((file) => file.path).sort()).toEqual(expectedPaths);
+    expect(files.filter((file) => file.code.includes(otherSide)).map((file) => file.path)).toEqual([]);
+  });
+
   it("keeps nested struct arrays as plain RPC arrays without target collection imports", () => {
     const files = generateSimpleDataObjectsFiles({
       modules: [{

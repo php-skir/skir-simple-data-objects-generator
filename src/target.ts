@@ -598,7 +598,7 @@ function nestedValueFromSkirPayloadExpression(
 
     return [
       "array_map(",
-      `    static fn (${inputType} $item, int ${index}): ${returnType} => ${continuedItemExpression},`,
+      `    static fn (${inputType} $item, int|string ${index}): ${returnType} => ${continuedItemExpression},`,
       `    ${continuedSourceExpression},`,
       `    array_keys(${continuedSourceExpression}),`,
       ")",

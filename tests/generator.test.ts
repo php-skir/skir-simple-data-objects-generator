@@ -203,7 +203,7 @@ describe("generateSimpleDataObjectsFiles", () => {
     expect(user).toContain("($data['optional_addresses'] ?? null) === null ? null : array_map(");
     expect(user).toContain("'status' => SubscriptionStatusData::fromSkirValue($data['status'])");
     expect(user).toContain("self::hydrateNested('address', static fn (): AddressData => AddressData::makeFromSkirPayload($data['address']))");
-    expect(user).toContain("static fn (array $item, int $index): AddressData => self::hydrateNested('previous_addresses'.'.'.$index, static fn (): AddressData => AddressData::makeFromSkirPayload($item))");
+    expect(user).toContain("static fn (array $item, int|string $index): AddressData => self::hydrateNested('previous_addresses'.'.'.$index, static fn (): AddressData => AddressData::makeFromSkirPayload($item))");
     expect(user).toContain("'nested_addresses'.'.'.$index.'.'.$index1");
     expect(user).toContain("private static function hydrateNested(string $path, Closure $hydrate): mixed");
     expect(user).toContain("return self::from($payload);");

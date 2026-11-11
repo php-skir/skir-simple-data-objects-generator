@@ -251,6 +251,8 @@ Unknown modules, records, or fields fail generation instead of silently dropping
 
 Only non-empty string rules can be encoded in `skir.yml`. The generator appends them after structural rules without reordering them. Register every custom named rule before generated DTO validation runs.
 
+Generated RPC clients validate responses with the same rules. When a separate client package is generated with [`emit: client`](#client-only-and-server-only-output), configure overlays there only if the client application registers those named rules too.
+
 ### Register custom rules in Laravel
 
 Laravel's validator is available to `BaseData` through the application container. Register custom named rules during application boot:
@@ -308,10 +310,10 @@ That boundary must live outside `skirout`, because regeneration overwrites gener
 
 ## RPC clients, procedures, and manifests
 
-When a schema contains methods, the generator emits six module-scoped PHP RPC files plus `skir-server-manifest.json`:
+When a schema contains methods, the generator emits up to six module-scoped PHP RPC files plus `skir-server-manifest.json`. Which of them you get depends on [`emit`](#client-only-and-server-only-output):
 
 - `SkirMethods.php` with runtime `MethodDescriptor` instances.
-- A module method enum such as `AdminSkirMethod.php`.
+- A module method enum such as `AdminSkirMethod.php`. It implements `Skir\Server\Contracts\SkirMethodReference`, so it needs `php-skir/server`.
 - `SkirRpcClient.php` with typed request and response conversion.
 - `SkirProcedures.php` and `AbstractSkirProcedures.php` for implementation contracts.
 - `SkirProcedureProvider.php` for server registration.
@@ -332,6 +334,79 @@ composer require php-skir/server
 RPC methods retain target types at the application boundary. Direct struct collections are accepted and returned as `TypedDataCollection`; nested collection shapes remain arrays. The generated client converts requests to raw Skir values and hydrates responses. The generated providers validate and hydrate incoming raw values before calling application code, then convert returned DTOs back to Skir values.
 
 This generator emits contracts and conversions only. HTTP transport and server routing remain the responsibility of `php-skir/client`, `php-skir/server`, and the application.
+
+## Client-only and server-only output
+
+By default (`emit: both`) the generator writes the client and server RPC files side by side. Set `emit` to write only one side:
+
+| File | Needs | `both` | `client` | `server` |
+| --- | --- | --- | --- | --- |
+| Struct and enum data classes | `php-skir/runtime`, `std-out/simple-data-objects` | yes | yes | yes |
+| `SkirMethods.php` | `php-skir/runtime` | yes | yes | yes |
+| `SkirRpcClient.php` | `php-skir/client` | yes | yes | no |
+| Module method enum, `SkirProcedures.php`, `AbstractSkirProcedures.php`, `SkirProcedureProvider.php` | `php-skir/server` | yes | no | yes |
+| `skir-server-manifest.json` | read by `php artisan skir:make` | yes | no | yes |
+
+A typical use is one schema that a server generates into its own code and a separate Composer package receives as a client. Skir allows only one entry per generator in a `skir.yml`, so give the client package its own Skir root. Keep it next to the server's `skir.yml` and symlink the shared sources into it:
+
+```text
+api/
+├── skir.yml                    # emit: server, namespace Skir
+├── skir-src/
+├── skir/internal-client/
+│   ├── skir.yml                # emit: client, namespace Trackr\InternalClient
+│   └── skir-src -> ../../skir-src
+└── packages/internal-client/   # the client package, e.g. a git submodule
+    ├── composer.json
+    └── skirout/                # generated
+```
+
+```yaml
+# skir.yml
+generators:
+  - mod: skir-simple-data-objects-generator
+    outDir: ./skir/php-internal/skirout
+    config:
+      namespace: Skir
+      emit: server
+```
+
+```yaml
+# skir/internal-client/skir.yml
+generators:
+  - mod: skir-simple-data-objects-generator
+    outDir: ../../packages/internal-client/skirout
+    config:
+      namespace: Trackr\InternalClient
+      emit: client
+```
+
+Generate both roots, for example from one npm script:
+
+```bash
+npx skir gen && npx skir gen --root skir/internal-client
+```
+
+Paths in a `skir.yml` are relative to its own directory, and the output directory may sit outside that root. Its name must still end in `/skirout`. The client package maps its namespace in its own `composer.json`, which `configure-composer` does not touch:
+
+```json
+{
+    "require": {
+        "php-skir/client": "^0.2",
+        "php-skir/runtime": "^0.2.1",
+        "std-out/simple-data-objects": "^1.11"
+    },
+    "autoload": {
+        "psr-4": {
+            "Trackr\\InternalClient\\": "skirout/"
+        }
+    }
+}
+```
+
+Leave `validation` off the client root unless the client application registers the same named rules: generated clients validate every response while hydrating it. See [Validation overlays](#validation-overlays).
+
+When the client package is a git submodule, commit regenerated files in the submodule first, then commit the updated submodule pointer in the server repository.
 
 ## Development and contributing
 

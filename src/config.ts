@@ -1,5 +1,6 @@
 import {
   DEFAULT_NAMESPACE,
+  Emit,
   PhpNamespace,
   ValidationConfig,
 } from "@php-skir/generator-core";
@@ -11,6 +12,7 @@ export { DEFAULT_NAMESPACE, PhpNamespace };
 export const GeneratorConfig = z.strictObject({
   namespace: PhpNamespace.default(DEFAULT_NAMESPACE),
   validation: ValidationConfig.optional(),
+  emit: Emit,
 });
 
 export type GeneratorConfig = z.infer<typeof GeneratorConfig>;

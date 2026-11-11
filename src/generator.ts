@@ -20,11 +20,12 @@ export interface PhpGeneratorInput extends CoreGeneratorInput {
 }
 
 export function generateSimpleDataObjectsFiles(input: PhpGeneratorInput): GeneratedFile[] {
-  const { namespace, validation = {} } = GeneratorConfig.parse(input.config ?? {});
+  const { namespace, validation = {}, emit } = GeneratorConfig.parse(input.config ?? {});
 
   return generatePhp({
     ...input,
     namespace,
+    emit,
     adapter: new SimpleDataObjectsTarget(validation),
   });
 }

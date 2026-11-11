@@ -216,6 +216,8 @@ Array validation is structural only at the field level. The generator emits `arr
 
 Generated RPC providers use the same raw-to-target conversion for incoming requests, and generated clients use it for responses. Direct struct requests and every recursively hydrated nested struct are validated before application code receives them.
 
+A nested struct reports its validation errors under its path in the parent, with list indexes: an invalid `city` in the second item of `previous_addresses` fails as `previous_addresses.1.city`, not `city`. The messages themselves are produced by the nested struct, so its attribute names and translations apply unchanged.
+
 The final `BaseData::from()` call is intentionally a hydration-only operation and does not validate by itself. Calling `SomeData::from($untrustedInput)` directly bypasses the generated raw-first validation sequence.
 
 ### Validation overlays

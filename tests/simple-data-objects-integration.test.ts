@@ -389,6 +389,24 @@ $payload = [
 ];
 $user = UserData::makeFromSkirPayload($payload);
 
+$nestedErrorPaths = [
+    'address.city' => [...$payload, 'address' => ['city' => '', 'postal_codes' => ['1000']]],
+    'previous_addresses.1.city' => [...$payload, 'previous_addresses' => [$payload['address'], ['city' => '', 'postal_codes' => ['1000']]]],
+    'nullable_addresses.1.city' => [...$payload, 'nullable_addresses' => [null, ['city' => '', 'postal_codes' => ['1000']]]],
+    'nested_addresses.0.1.city' => [...$payload, 'nested_addresses' => [[$payload['address'], ['city' => '', 'postal_codes' => ['1000']]]]],
+];
+
+foreach ($nestedErrorPaths as $expectedPath => $invalidPayload) {
+    try {
+        UserData::makeFromSkirPayload($invalidPayload);
+        throw new RuntimeException("Expected nested validation to fail at {$expectedPath}.");
+    } catch (ValidationException $exception) {
+        if (array_keys($exception->errors()) !== [$expectedPath]) {
+            throw new RuntimeException("Nested validation error is not reported at {$expectedPath}: ".implode(', ', array_keys($exception->errors())));
+        }
+    }
+}
+
 if (! $user->address instanceof AddressData || $user->address->city !== 'Antwerp') {
     throw new RuntimeException('Unexpected direct struct hydration.');
 }

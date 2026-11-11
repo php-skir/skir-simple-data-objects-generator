@@ -36,6 +36,9 @@ const MAP_PROPERTY_NAME = "StdOut\\SimpleDataObjects\\Attributes\\MapPropertyNam
 const RULES = "StdOut\\SimpleDataObjects\\Attributes\\Rules";
 const BASE_DATA = "StdOut\\SimpleDataObjects\\BaseData";
 const TYPED_DATA_COLLECTION = "StdOut\\SimpleDataObjects\\TypedDataCollection";
+const CLOSURE = "Closure";
+const VALIDATION_EXCEPTION = "Illuminate\\Validation\\ValidationException";
+const VALIDATOR = "Illuminate\\Validation\\Validator";
 const BASE_STRUCT_IMPORTS = [
   BINARY_FORMAT,
   DENSE_JSON,
@@ -82,6 +85,10 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
 
     if (fields.some((field) => dataCollectionType(field.type) !== null)) {
       imports.push(DATA_COLLECTION, TYPED_DATA_COLLECTION);
+    }
+
+    if (fields.some((field) => containsNestedStruct(field.type))) {
+      imports.push(CLOSURE, VALIDATION_EXCEPTION, VALIDATOR);
     }
 
     return imports;
@@ -136,6 +143,9 @@ export class SimpleDataObjectsTarget implements PhpTargetAdapter {
       this.renderToReadableJson(readableJson),
       this.renderToBytes(binaryFormat),
       this.renderFromBytes(className, binaryFormat),
+      fields.some((field) => containsNestedStruct(field.type))
+        ? renderHydrateNested(context)
+        : null,
     ].filter((member): member is string => member !== null);
     const body = [
       `final class ${className} extends ${baseData}`,
@@ -503,11 +513,13 @@ function propertyAttributes(
 function renderPayloadEntry(field: NormalizedField, context: RenderContext): string {
   const fieldLiteral = phpSingleQuotedLiteral(field.name);
   const directExpression = `$data[${fieldLiteral}]`;
-  const expression = valueFromSkirPayloadExpression(
+  const expression = nestedValueFromSkirPayloadExpression(
     field.type,
     field.type.kind === "optional"
       ? `${directExpression} ?? null`
       : directExpression,
+    fieldLiteral,
+    0,
     context,
   );
 
@@ -550,6 +562,99 @@ function valueFromSkirPayloadExpression(
   }
 
   return expression;
+}
+
+/**
+ * Like valueFromSkirPayloadExpression(), but a nested struct is hydrated through `self::hydrateNested()`, which
+ * prefixes its validation errors with where it sits in this struct (`details.0.label`, not `label`).
+ * `path` is a PHP string expression; `depth` keeps the index variables of nested arrays apart.
+ */
+function nestedValueFromSkirPayloadExpression(
+  type: NormalizedType,
+  expression: string,
+  path: string,
+  depth: number,
+  context: RenderContext,
+): string {
+  if (type.kind === "record" && type.recordType === "struct") {
+    const className = recordTypeClassName(type, context);
+    return `self::hydrateNested(${path}, static fn (): ${className} => ${className}::makeFromSkirPayload(${expression}))`;
+  }
+
+  if (type.kind === "optional") {
+    if (isRecursivelyMappedType(type.inner)) {
+      return `(${expression}) === null ? null : ${nestedValueFromSkirPayloadExpression(type.inner, expression, path, depth, context)}`;
+    }
+
+    return expression;
+  }
+
+  if (type.kind === "array" && containsNestedStruct(type.item)) {
+    const index = depth === 0 ? "$index" : `$index${depth}`;
+    const itemExpression = nestedValueFromSkirPayloadExpression(type.item, "$item", `${path}.'.'.${index}`, depth + 1, context);
+    const [inputType, returnType] = hydrationArrowTypes(type.item, context);
+    const continuedItemExpression = itemExpression.replaceAll("\n", "\n    ");
+    const continuedSourceExpression = expression.replaceAll("\n", "\n    ");
+
+    return [
+      "array_map(",
+      `    static fn (${inputType} $item, int ${index}): ${returnType} => ${continuedItemExpression},`,
+      `    ${continuedSourceExpression},`,
+      `    array_keys(${continuedSourceExpression}),`,
+      ")",
+    ].join("\n");
+  }
+
+  return valueFromSkirPayloadExpression(type, expression, context);
+}
+
+function containsNestedStruct(type: NormalizedType): boolean {
+  if (type.kind === "record") {
+    return type.recordType === "struct";
+  }
+
+  if (type.kind === "optional") {
+    return containsNestedStruct(type.inner);
+  }
+
+  if (type.kind === "array") {
+    return containsNestedStruct(type.item);
+  }
+
+  return false;
+}
+
+function renderHydrateNested(context: RenderContext): string {
+  const closure = importClass(context.imports, CLOSURE);
+  const validationException = importClass(context.imports, VALIDATION_EXCEPTION);
+  const validator = importClass(context.imports, VALIDATOR);
+
+  return [
+    "/**",
+    " * Hydrates a nested struct and reports its validation errors under its path in this struct.",
+    " *",
+    " * @template T",
+    ` * @param ${closure}(): T $hydrate`,
+    " * @return T",
+    " */",
+    `private static function hydrateNested(string $path, ${closure} $hydrate): mixed`,
+    "{",
+    "    try {",
+    "        return $hydrate();",
+    `    } catch (${validationException} $exception) {`,
+    // Not ValidationException::withMessages(): that needs Laravel's facades, and these objects also run without them.
+    `        $prefixed = new ${validator}($exception->validator->getTranslator(), [], []);`,
+    "",
+    "        foreach ($exception->errors() as $key => $messages) {",
+    "            foreach ($messages as $message) {",
+    "                $prefixed->errors()->add(\"{$path}.{$key}\", $message);",
+    "            }",
+    "        }",
+    "",
+    `        throw new ${validationException}($prefixed);`,
+    "    }",
+    "}",
+  ].join("\n");
 }
 
 function valueFromTargetExpression(

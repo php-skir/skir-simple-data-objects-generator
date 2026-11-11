@@ -394,7 +394,7 @@ Paths in a `skir.yml` are relative to its own directory, and the output director
     "require": {
         "php-skir/client": "^0.2",
         "php-skir/runtime": "^0.2.1",
-        "std-out/simple-data-objects": "^1.11"
+        "std-out/simple-data-objects": "^2.8"
     },
     "autoload": {
         "psr-4": {
